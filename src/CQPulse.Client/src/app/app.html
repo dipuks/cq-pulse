@@ -10,11 +10,13 @@
 <main class="shell">
   <aside class="sidebar">
     <a class="brand" href="#"><span>CQ</span> Pulse<small>Cloud QA</small></a>
-    <nav><a class="active">▣ Dashboard</a><a>▤ Projects</a><a>▣ Test Suites</a><a>✓ Test Cases</a><a>▷ Test Runs</a><a>◈ Simulator</a><a>⌁ Analytics</a><a>⚙ Settings</a></nav>
+    <nav><button [class.active]="activeSection() === 'Dashboard'" (click)="navigate('Dashboard')">▣ Dashboard</button><button [class.active]="activeSection() === 'Projects'" (click)="navigate('Projects')">▤ Projects</button><button [class.active]="activeSection() === 'Test Suites'" (click)="navigate('Test Suites')">▣ Test Suites</button><button [class.active]="activeSection() === 'Test Cases'" (click)="navigate('Test Cases')">✓ Test Cases</button><button [class.active]="activeSection() === 'Test Runs'" (click)="navigate('Test Runs')">▷ Test Runs</button><button [class.active]="activeSection() === 'Simulator'" (click)="navigate('Simulator')">◈ Simulator</button><button [class.active]="activeSection() === 'Analytics'" (click)="navigate('Analytics')">⌁ Analytics</button><button [class.active]="activeSection() === 'Settings'" (click)="navigate('Settings')">⚙ Settings</button></nav>
     <div class="sidebar-note"><strong>Ready to scale</strong><br>Run realistic test workloads with bounded concurrency.</div>
   </aside>
   <section class="content">
     <header><div class="mobile-brand">CQ Pulse</div><div class="search">⌕ Search projects, tests, or runs…</div><button class="theme" (click)="setTheme(!isDark())">{{ isDark() ? '☀ Light' : '◐ Dark' }}</button><button class="theme" (click)="logout()">Sign out</button><div class="avatar">JD</div></header>
+    <section class="section-banner" *ngIf="activeSection() !== 'Dashboard'"><p class="eyebrow">{{ activeSection().toUpperCase() }}</p><h1>{{ activeSection() }}</h1><p class="intro">This workspace is connected to the CQ Pulse API foundation. Dashboard controls and simulator execution remain available while the dedicated routed workflow is being completed.</p><button class="primary" (click)="navigate('Dashboard')">Return to dashboard</button></section>
+    <div [class.page-hidden]="activeSection() !== 'Dashboard'">
     <section class="hero"><div><p class="eyebrow">QUALITY COMMAND CENTER</p><h1>See every run.<br><em>Know every risk.</em></h1><p class="intro">Orchestrate high-volume test simulations, monitor execution in real time, and turn results into confident decisions.</p><div class="hero-pills"><span>◈ Real-time execution</span><span>◌ Configurable outcomes</span><span>✓ Persisted analytics</span></div></div><button class="primary" (click)="startSimulation()" [disabled]="isStarting() || !selectedProjectId()">{{ isStarting() ? 'Starting…' : '▶ Start simulation' }}</button></section>
     <p class="error" *ngIf="error()">{{ error() }}</p>
     <section class="metrics">
@@ -49,6 +51,7 @@
       <article class="panel activity-panel"><div class="panel-title"><div><p class="eyebrow">RUN ACTIVITY</p><h2>Latest execution</h2></div><span class="status">{{ activeRun()?.status || 'Ready' }}</span></div><div class="activity"><span class="activity-icon">▶</span><div><strong>{{ activeRun()?.status || 'Ready to simulate' }}</strong><small>{{ activeRun() ? (activeRun()!.completedTests + ' of ' + activeRun()!.totalTests + ' tests processed') : 'Configure a workload to begin.' }}</small></div></div><div class="activity"><span class="activity-icon teal-bg">◈</span><div><strong>{{ summary()?.totalRuns || 0 }} total runs</strong><small>Results are stored in your local SQL Server.</small></div></div></article>
     </section>
     <section class="panel projects"><div class="panel-title"><div><p class="eyebrow">PROJECTS</p><h2>Your quality portfolio</h2></div><button class="text-button">View all →</button></div><div class="project-list"><div *ngFor="let project of projects()" class="project"><span class="project-icon">◈</span><div><strong>{{ project.name }}</strong><small>{{ project.description }}</small></div><span class="active-pill">Active</span></div><div *ngIf="!projects().length" class="empty">Start the API to load your development projects.</div></div></section>
+    </div>
   </section>
 </main>
 </ng-template>

@@ -27,6 +27,7 @@ export class App implements OnInit {
   protected readonly activeRun = signal<Run | null>(null);
   protected readonly summary = signal<DashboardSummary | null>(null);
   protected readonly authenticated = signal(false);
+  protected readonly activeSection = signal('Dashboard');
   protected readonly email = signal('');
   protected readonly password = signal('');
   protected readonly loginError = signal('');
@@ -66,6 +67,10 @@ export class App implements OnInit {
   protected logout(): void {
     localStorage.removeItem('cq-pulse-token');
     this.authenticated.set(false);
+  }
+
+  protected navigate(section: string): void {
+    this.activeSection.set(section);
   }
 
   private loadDashboard(): void {
