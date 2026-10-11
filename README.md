@@ -14,6 +14,9 @@ The local connection string is intentionally stored outside source control. For 
 
 ```powershell
 dotnet user-secrets set 'ConnectionStrings:CQPulse' 'Server=.\SQLEXPRESS;Database=CQPulse;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True' --project src\CQPulse.Api
+dotnet user-secrets set 'Jwt:SigningKey' '<a-random-32-character-minimum-key>' --project src\CQPulse.Api
+dotnet user-secrets set 'DevelopmentAdmin:Email' 'you@example.test' --project src\CQPulse.Api
+dotnet user-secrets set 'DevelopmentAdmin:Password' '<a-strong-local-development-password>' --project src\CQPulse.Api
 dotnet ef database update --project src\CQPulse.Infrastructure --startup-project src\CQPulse.Api
 dotnet run --project src\CQPulse.Api --launch-profile https
 ```
@@ -38,4 +41,4 @@ npm run build
 
 ## Current limitations
 
-Authentication, management CRUD screens, batched result persistence for very large workloads, analytics, and CI remain in active development. The simulator is an MVP in-process worker and is not a durable distributed job system.
+The API provides JWT login and a development-only admin seeding mechanism. The browser login flow, route authorization, management screens, batched result persistence for very large workloads, analytics, and CI remain in active development. The simulator is an MVP in-process worker and is not a durable distributed job system.
