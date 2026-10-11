@@ -16,7 +16,7 @@
   <section class="content">
     <header><div class="mobile-brand">CQ Pulse</div><div class="search">⌕ Search projects, tests, or runs…</div><button class="theme" (click)="setTheme(!isDark())">{{ isDark() ? '☀ Light' : '◐ Dark' }}</button><button class="theme" (click)="logout()">Sign out</button><div class="avatar">JD</div></header>
     <section class="section-banner" *ngIf="activeSection() !== 'Dashboard'"><p class="eyebrow">{{ activeSection().toUpperCase() }}</p><h1>{{ activeSection() }}</h1><p class="intro">This workspace is connected to the CQ Pulse API foundation. Dashboard controls and simulator execution remain available while the dedicated routed workflow is being completed.</p><button class="primary" (click)="navigate('Dashboard')">Return to dashboard</button></section>
-    <div [class.page-hidden]="activeSection() !== 'Dashboard'">
+    <div class="dashboard-content" [class.page-hidden]="activeSection() !== 'Dashboard'">
     <section class="hero"><div><p class="eyebrow">QUALITY COMMAND CENTER</p><h1>See every run.<br><em>Know every risk.</em></h1><p class="intro">Orchestrate high-volume test simulations, monitor execution in real time, and turn results into confident decisions.</p><div class="hero-pills"><span>◈ Real-time execution</span><span>◌ Configurable outcomes</span><span>✓ Persisted analytics</span></div></div><button class="primary" (click)="startSimulation()" [disabled]="isStarting() || !selectedProjectId()">{{ isStarting() ? 'Starting…' : '▶ Start simulation' }}</button></section>
     <p class="error" *ngIf="error()">{{ error() }}</p>
     <section class="metrics">
