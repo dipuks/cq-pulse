@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { DecimalPipe, NgFor, NgIf } from '@angular/common';
 
 interface Project { id: string; name: string; description?: string; }
+interface PageResponse<T> { items: T[]; totalCount: number; page: number; pageSize: number; }
 interface Run { id: string; status: string; totalTests: number; completedTests: number; passedCount: number; failedCount: number; skippedCount: number; }
 interface DashboardSummary { projectCount: number; testSuiteCount: number; testCaseCount: number; totalRuns?: number; passed?: number; failed?: number; skipped?: number; activeRuns?: number; passRate: number; }
 
@@ -68,10 +69,10 @@ export class App implements OnInit {
   }
 
   private loadDashboard(): void {
-    this.http.get<Project[]>(`${this.apiUrl}/projects`).subscribe({
-      next: projects => {
-        this.projects.set(projects);
-        if (projects[0]) this.selectedProjectId.set(projects[0].id);
+    this.http.get<PageResponse<Project>>(`${this.apiUrl}/projects`).subscribe({
+      next: response => {
+        this.projects.set(response.items);
+        if (response.items[0]) this.selectedProjectId.set(response.items[0].id);
       },
       error: () => this.error.set('Unable to reach the CQ Pulse API. Start the API at https://localhost:7256.')
     });
