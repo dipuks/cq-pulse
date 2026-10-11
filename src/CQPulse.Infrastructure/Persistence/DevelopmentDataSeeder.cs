@@ -8,16 +8,20 @@ public static class DevelopmentDataSeeder
 {
     public static async Task SeedAsync(CQPulseDbContext dbContext, CancellationToken cancellationToken)
     {
-        if (await dbContext.Projects.AnyAsync(cancellationToken)) return;
-
-        var project = new Project
+        if (!await dbContext.Projects.AnyAsync(cancellationToken))
         {
-            Name = "Web Portal",
-            Description = "Customer self-service web application"
-        };
+            dbContext.Projects.Add(new Project { Name = "Web Portal", Description = "Customer self-service web application" });
+            dbContext.Projects.Add(new Project { Name = "Mobile App", Description = "iOS and Android customer application" });
+            dbContext.Projects.Add(new Project { Name = "API Services", Description = "Internal platform APIs" });
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        if (await dbContext.TestSuites.AnyAsync(cancellationToken)) return;
+
+        var project = await dbContext.Projects.OrderBy(x => x.Name).FirstAsync(cancellationToken);
         var suite = new TestSuite
         {
-            Project = project,
+            ProjectId = project.Id,
             Name = "Login & Authentication",
             Description = "Core sign-in and account recovery scenarios"
         };
@@ -37,17 +41,7 @@ public static class DevelopmentDataSeeder
             SimulatedOutcome = SimulatedOutcome.Failed,
             SimulatedDurationMs = 650
         });
-        dbContext.Projects.Add(project);
-        dbContext.Projects.Add(new Project
-        {
-            Name = "Mobile App",
-            Description = "iOS and Android customer application"
-        });
-        dbContext.Projects.Add(new Project
-        {
-            Name = "API Services",
-            Description = "Internal platform APIs"
-        });
+        dbContext.TestSuites.Add(suite);
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 }

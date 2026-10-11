@@ -1,4 +1,5 @@
 using CQPulse.Infrastructure.Identity;
+using CQPulse.Infrastructure.Catalog;
 using CQPulse.Infrastructure.Persistence;
 using CQPulse.Infrastructure.Simulator;
 using Microsoft.AspNetCore.Identity;
@@ -23,6 +24,7 @@ public static class ServiceCollectionExtensions
 
         services.AddDbContext<CQPulseDbContext>(options => options.UseSqlServer(connectionString));
         services.AddSingleton<SimulationQueue>();
+        services.AddScoped<CQPulse.Application.Catalog.ICatalogService, CatalogService>();
         services.AddScoped<CQPulse.Application.Simulation.ISimulationService, SimulationService>();
         services.AddHostedService<SimulationWorker>();
         services.AddIdentityCore<ApplicationUser>(options =>
