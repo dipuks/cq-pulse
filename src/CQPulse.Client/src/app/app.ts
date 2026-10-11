@@ -140,7 +140,9 @@ export class App implements OnInit, OnDestroy {
     if (this.runConnection && this.currentRunId === runId) return;
     await this.runConnection?.stop();
     this.currentRunId = runId;
-    const connection = new HubConnectionBuilder().withUrl('https://localhost:7256/hubs/runs')
+    const connection = new HubConnectionBuilder().withUrl('https://localhost:7256/hubs/runs', {
+        accessTokenFactory: () => localStorage.getItem('cq-pulse-token') ?? ''
+      })
       .withAutomaticReconnect().configureLogging(LogLevel.Warning).build();
     connection.on('RunProgressUpdated', (progress: RunProgress) => {
       if (progress.runId === runId) {

@@ -1,9 +1,11 @@
 using CQPulse.Application.Catalog;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace CQPulse.Api.Controllers;
 
 [ApiController]
+[Authorize(Roles = "Administrator")]
 [Route("api/projects")]
 public sealed class ProjectsController(ICatalogService catalog) : ControllerBase
 {

@@ -1,11 +1,13 @@
 using CQPulse.Application.Simulation;
 using CQPulse.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace CQPulse.Api.Controllers;
 
 [ApiController]
+[Authorize(Roles = "Administrator")]
 [Route("api/simulator")]
 public sealed class SimulatorController(
     ISimulationService simulationService,

@@ -1,10 +1,12 @@
 using CQPulse.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace CQPulse.Api.Controllers;
 
 [ApiController]
+[Authorize(Roles = "Administrator")]
 [Route("api/dashboard")]
 public sealed class DashboardController(CQPulseDbContext dbContext) : ControllerBase
 {
