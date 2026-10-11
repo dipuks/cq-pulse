@@ -24,6 +24,7 @@ public static class ServiceCollectionExtensions
 
         services.AddDbContext<CQPulseDbContext>(options => options.UseSqlServer(connectionString));
         services.AddSingleton<SimulationQueue>();
+        services.AddSingleton<RunCancellationRegistry>();
         services.AddScoped<CQPulse.Application.Catalog.ICatalogService, CatalogService>();
         services.AddScoped<CQPulse.Application.Simulation.ISimulationService, SimulationService>();
         services.AddHostedService<SimulationWorker>();

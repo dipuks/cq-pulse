@@ -16,6 +16,9 @@ export class App implements OnInit {
   protected readonly projects = signal<Project[]>([]);
   protected readonly selectedProjectId = signal('');
   protected readonly testCount = signal(100);
+  protected readonly passPercentage = signal(88);
+  protected readonly failurePercentage = signal(8);
+  protected readonly skippedPercentage = signal(4);
   protected readonly isDark = signal(false);
   protected readonly isStarting = signal(false);
   protected readonly error = signal('');
@@ -45,12 +48,18 @@ export class App implements OnInit {
 
   protected startSimulation(): void {
     if (!this.selectedProjectId() || this.isStarting()) return;
+    if (this.passPercentage() + this.failurePercentage() + this.skippedPercentage() !== 100) {
+      this.error.set('Pass, failure, and skipped percentages must total 100%.');
+      return;
+    }
     this.isStarting.set(true);
     this.error.set('');
     this.http.post<{ runId: string }>(`${this.apiUrl}/simulator/runs`, {
       projectId: this.selectedProjectId(), testSuiteId: null, testCount: this.testCount(),
       maxConcurrency: 12, minimumDurationMs: 20, maximumDurationMs: 90,
-      passPercentage: 88, failurePercentage: 8, skippedPercentage: 4, runLabel: 'Dashboard simulation'
+      passPercentage: this.passPercentage(), failurePercentage: this.failurePercentage(), skippedPercentage: this.skippedPercentage(),
+      failureCategories: ['UiElement', 'ApiError', 'Timeout', 'DataValidation', 'Environment'],
+      runLabel: 'Dashboard simulation'
     }).subscribe({
       next: ({ runId }) => { this.isStarting.set(false); this.pollRun(runId); },
       error: () => { this.isStarting.set(false); this.error.set('The simulation could not be started. Check API availability and the selected project.'); }

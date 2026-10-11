@@ -12,6 +12,7 @@ public sealed record SimulationRequest(
     int PassPercentage,
     int FailurePercentage,
     int SkippedPercentage,
+    IReadOnlyList<FailureCategory>? FailureCategories,
     int? RandomSeed,
     string? RunLabel);
 

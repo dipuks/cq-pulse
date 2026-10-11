@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CQPulse.Infrastructure.Simulator;
 
-internal sealed class SimulationService(CQPulseDbContext dbContext, SimulationQueue queue) : ISimulationService
+internal sealed class SimulationService(CQPulseDbContext dbContext, SimulationQueue queue, RunCancellationRegistry cancellations) : ISimulationService
 {
     private const int MaximumTests = 50_000;
     private const int MaximumConcurrency = 128;
@@ -77,6 +77,7 @@ internal sealed class SimulationService(CQPulseDbContext dbContext, SimulationQu
             ?? throw new KeyNotFoundException("The requested run does not exist.");
         run.Cancel(DateTimeOffset.UtcNow, "Cancelled by user.");
         await dbContext.SaveChangesAsync(cancellationToken);
+        cancellations.Cancel(runId);
     }
 
     private static void Validate(SimulationRequest request)
@@ -89,5 +90,7 @@ internal sealed class SimulationService(CQPulseDbContext dbContext, SimulationQu
             throw new ArgumentException("Simulation durations are invalid.");
         if (request.PassPercentage + request.FailurePercentage + request.SkippedPercentage != 100)
             throw new ArgumentException("Outcome percentages must total 100.");
+        if (request.FailurePercentage > 0 && (request.FailureCategories is null || request.FailureCategories.Count == 0))
+            throw new ArgumentException("At least one failure category is required when failures are configured.");
     }
 }
