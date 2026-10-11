@@ -1,11 +1,13 @@
 import { HttpClient } from '@angular/common/http';
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe, NgFor, NgIf } from '@angular/common';
+import { HubConnection, HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 
 interface Project { id: string; name: string; description?: string; }
 interface PageResponse<T> { items: T[]; totalCount: number; page: number; pageSize: number; }
 interface Run { id: string; status: string; totalTests: number; completedTests: number; passedCount: number; failedCount: number; skippedCount: number; }
+interface RunProgress { runId: string; status: string; totalTests: number; completedTests: number; passedCount: number; failedCount: number; skippedCount: number; }
 interface DashboardSummary { projectCount: number; testSuiteCount: number; testCaseCount: number; totalRuns?: number; passed?: number; failed?: number; skipped?: number; activeRuns?: number; passRate: number; }
 
 @Component({
@@ -14,7 +16,7 @@ interface DashboardSummary { projectCount: number; testSuiteCount: number; testC
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
-export class App implements OnInit {
+export class App implements OnInit, OnDestroy {
   protected readonly projects = signal<Project[]>([]);
   protected readonly selectedProjectId = signal('');
   protected readonly testCount = signal(100);
@@ -34,6 +36,8 @@ export class App implements OnInit {
   protected readonly loggingIn = signal(false);
   private readonly apiUrl = 'https://localhost:7256/api';
   private poller?: ReturnType<typeof setInterval>;
+  private runConnection?: HubConnection;
+  private currentRunId?: string;
 
   constructor(private readonly http: HttpClient) {}
 
@@ -42,6 +46,11 @@ export class App implements OnInit {
     this.setTheme(savedTheme === 'dark' || (!savedTheme && matchMedia('(prefers-color-scheme: dark)').matches));
     this.authenticated.set(Boolean(localStorage.getItem('cq-pulse-token')));
     if (this.authenticated()) this.loadDashboard();
+  }
+
+  ngOnDestroy(): void {
+    if (this.poller) clearInterval(this.poller);
+    void this.runConnection?.stop();
   }
 
   protected login(): void {
@@ -105,7 +114,7 @@ export class App implements OnInit {
       failureCategories: ['UiElement', 'ApiError', 'Timeout', 'DataValidation', 'Environment'],
       runLabel: 'Dashboard simulation'
     }).subscribe({
-      next: ({ runId }) => { this.isStarting.set(false); this.pollRun(runId); },
+      next: ({ runId }) => { this.isStarting.set(false); this.pollRun(runId); void this.connectRun(runId); },
       error: () => { this.isStarting.set(false); this.error.set('The simulation could not be started. Check API availability and the selected project.'); }
     });
   }
@@ -120,10 +129,42 @@ export class App implements OnInit {
           clearInterval(this.poller);
           this.poller = undefined;
         }
+
       }
     });
     refresh();
     this.poller = setInterval(refresh, 700);
+  }
+
+  private async connectRun(runId: string): Promise<void> {
+    if (this.runConnection && this.currentRunId === runId) return;
+    await this.runConnection?.stop();
+    this.currentRunId = runId;
+    const connection = new HubConnectionBuilder().withUrl('https://localhost:7256/hubs/runs')
+      .withAutomaticReconnect().configureLogging(LogLevel.Warning).build();
+    connection.on('RunProgressUpdated', (progress: RunProgress) => {
+      if (progress.runId === runId) {
+        this.activeRun.set({ ...progress, id: progress.runId });
+        this.refreshSummary();
+      }
+    });
+    connection.onreconnected(async () => {
+      await connection.invoke('JoinRun', runId);
+      this.reconcileRun(runId);
+    });
+    try {
+      await connection.start();
+      await connection.invoke('JoinRun', runId);
+      this.runConnection = connection;
+    } catch {
+      this.error.set('Live updates are unavailable; polling will continue.');
+    }
+  }
+
+  private reconcileRun(runId: string): void {
+    this.http.get<Run>(`${this.apiUrl}/simulator/runs/${runId}`).subscribe({
+      next: run => this.activeRun.set(run)
+    });
   }
 
   private refreshSummary(): void {

@@ -9,7 +9,7 @@ Audit date: 2026-10-11. Evidence is limited to the current repository and local 
 | 1,000/10,000 workloads | Partially Implemented | Verified after batched persistence: 1,000 persisted in 654 ms; 10,000 persisted in 4,235 ms, zero simulated duration, concurrency 128 | Measurements include no real delay or memory/DB write telemetry; 50,000 unmeasured | Add repeatable performance tests with memory/write metrics and a 50,000 scenario |
 | Execution architecture | Partially Implemented | Bounded queue (100), `Parallel.ForEachAsync`, cancellation registry, bounded 2,000-item result channel, short-lived 500-result EF save batches in `SimulationWorker` | No interrupted-run recovery, durable queue, retry policy, or multi-run worker scaling | Add startup reconciliation and an explicit retry/failure policy |
 | Database and migrations | Partially Implemented | `CQPulseDbContext`, migration `20261011132614_InitialCreate`, indexes for runs/results/logs; result snapshot and nullable case foreign key | No migration test, archive semantics, or measured query plan review | Add relational integration coverage and data-retention policy |
-| SignalR | Partially Implemented | `RunsHub`, `SignalRRunProgressPublisher`, worker progress events | Hub is unauthenticated; Angular polls REST and does not connect/reconcile SignalR | Add JWT hub auth, Angular SignalR client, reconnect/reconciliation tests |
+| SignalR | Partially Implemented | `RunsHub`, `SignalRRunProgressPublisher`, worker progress events; Angular `HubConnection` joins the run group, handles `RunProgressUpdated`, auto-reconnects, and REST-reconciles in `app.ts` | Hub is unauthenticated; no SignalR automated tests; REST polling remains the fallback | Add JWT hub auth and integration/reconnect tests |
 | Dashboard | Partially Implemented | `DashboardController.GetSummary`, Angular `refreshSummary` | Trend, failure bars, and portions of charts are illustrative rather than computed API analytics | Add real trend/failure APIs and bind every chart to them |
 | Analytics | Missing | No analytics controller/service or date-range query implementation | No duration, throughput, comparison, or category calculations | Implement server-side analytics projections and date filters |
 | Run details | Partially Implemented | `RunsController` paged results/logs, run status fields | No detail UI, logs are not written by worker, rerun endpoint absent | Persist bounded logs and add run detail/rerun UI/API |
@@ -37,3 +37,14 @@ These measurements do **not** establish 50,000-case feasibility, memory behavior
 3. Authenticate SignalR and connect the Angular client for real-time progress with REST reconciliation.
 4. Implement computed analytics endpoints and replace illustrative dashboard panels.
 5. Complete management workflows, authorization, routing, and operational documentation.
+
+## Commands verified in this audit increment
+
+```powershell
+dotnet build CQPulse.slnx --no-restore
+dotnet test CQPulse.slnx --no-build
+Set-Location src\CQPulse.Client
+npm run build
+```
+
+The Angular SignalR client production build passed after adding `@microsoft/signalr`. Existing backend unit/integration suites remain limited to four placeholder/lifecycle tests; dedicated simulator performance tests are still required.
