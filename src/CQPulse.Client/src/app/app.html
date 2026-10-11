@@ -9,10 +9,10 @@
     <section class="hero"><div><p class="eyebrow">QUALITY COMMAND CENTER</p><h1>See every run.<br><em>Know every risk.</em></h1><p class="intro">Orchestrate high-volume test simulations, monitor execution in real time, and turn results into confident decisions.</p></div><button class="primary" (click)="startSimulation()" [disabled]="isStarting() || !selectedProjectId()">{{ isStarting() ? 'Starting…' : '▶ Start simulation' }}</button></section>
     <p class="error" *ngIf="error()">{{ error() }}</p>
     <section class="metrics">
-      <article><span class="metric-icon blue">◈</span><small>Projects</small><strong>{{ projects().length }}</strong><i>Active workspaces</i></article>
-      <article><span class="metric-icon violet">✓</span><small>Simulator</small><strong>{{ activeRun()?.totalTests || '—' }}</strong><i>Tests in current run</i></article>
-      <article><span class="metric-icon teal">↗</span><small>Passed</small><strong>{{ activeRun()?.passedCount || '—' }}</strong><i>Completed successfully</i></article>
-      <article><span class="metric-icon orange">!</span><small>Failures</small><strong>{{ activeRun()?.failedCount || '—' }}</strong><i>Need investigation</i></article>
+      <article><span class="metric-icon blue">◈</span><small>Projects</small><strong>{{ summary()?.projectCount ?? projects().length }}</strong><i>Active workspaces</i></article>
+      <article><span class="metric-icon violet">✓</span><small>Test cases</small><strong>{{ summary()?.testCaseCount ?? '—' }}</strong><i>Managed tests</i></article>
+      <article><span class="metric-icon teal">↗</span><small>Passed</small><strong>{{ summary()?.passed ?? '—' }}</strong><i>{{ summary()?.passRate ?? 0 }}% pass rate</i></article>
+      <article><span class="metric-icon orange">!</span><small>Failures</small><strong>{{ summary()?.failed ?? '—' }}</strong><i>Need investigation</i></article>
     </section>
     <section class="grid">
       <article class="panel simulator"><div class="panel-title"><div><p class="eyebrow">TEST DATA SIMULATOR</p><h2>Configure a workload</h2></div><span class="tag">Live backend</span></div>

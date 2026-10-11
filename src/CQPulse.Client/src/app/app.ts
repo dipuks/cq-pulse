@@ -5,6 +5,7 @@ import { DecimalPipe, NgFor, NgIf } from '@angular/common';
 
 interface Project { id: string; name: string; description?: string; }
 interface Run { id: string; status: string; totalTests: number; completedTests: number; passedCount: number; failedCount: number; skippedCount: number; }
+interface DashboardSummary { projectCount: number; testSuiteCount: number; testCaseCount: number; totalRuns?: number; passed?: number; failed?: number; skipped?: number; activeRuns?: number; passRate: number; }
 
 @Component({
   selector: 'app-root',
@@ -23,6 +24,7 @@ export class App implements OnInit {
   protected readonly isStarting = signal(false);
   protected readonly error = signal('');
   protected readonly activeRun = signal<Run | null>(null);
+  protected readonly summary = signal<DashboardSummary | null>(null);
   private readonly apiUrl = 'https://localhost:7256/api';
   private poller?: ReturnType<typeof setInterval>;
 
@@ -38,6 +40,7 @@ export class App implements OnInit {
       },
       error: () => this.error.set('Unable to reach the CQ Pulse API. Start the API at https://localhost:7256.')
     });
+    this.refreshSummary();
   }
 
   protected setTheme(dark: boolean): void {
@@ -71,6 +74,7 @@ export class App implements OnInit {
     const refresh = () => this.http.get<Run>(`${this.apiUrl}/simulator/runs/${runId}`).subscribe({
       next: run => {
         this.activeRun.set(run);
+        this.refreshSummary();
         if (['Passed', 'CompletedWithFailures', 'Failed', 'Cancelled'].includes(run.status) && this.poller) {
           clearInterval(this.poller);
           this.poller = undefined;
@@ -79,5 +83,11 @@ export class App implements OnInit {
     });
     refresh();
     this.poller = setInterval(refresh, 700);
+  }
+
+  private refreshSummary(): void {
+    this.http.get<DashboardSummary>(`${this.apiUrl}/dashboard/summary`).subscribe({
+      next: summary => this.summary.set(summary)
+    });
   }
 }
