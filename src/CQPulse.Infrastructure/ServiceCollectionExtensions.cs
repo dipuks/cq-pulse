@@ -27,6 +27,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RunCancellationRegistry>();
         services.AddScoped<CQPulse.Application.Catalog.ICatalogService, CatalogService>();
         services.AddScoped<CQPulse.Application.Simulation.ISimulationService, SimulationService>();
+        services.AddHostedService<ExecutionRecoveryService>();
         services.AddHostedService<SimulationWorker>();
         services.AddIdentityCore<ApplicationUser>(options =>
             {
