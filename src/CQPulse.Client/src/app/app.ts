@@ -25,6 +25,11 @@ export class App implements OnInit {
   protected readonly error = signal('');
   protected readonly activeRun = signal<Run | null>(null);
   protected readonly summary = signal<DashboardSummary | null>(null);
+  protected readonly authenticated = signal(false);
+  protected readonly email = signal('');
+  protected readonly password = signal('');
+  protected readonly loginError = signal('');
+  protected readonly loggingIn = signal(false);
   private readonly apiUrl = 'https://localhost:7256/api';
   private poller?: ReturnType<typeof setInterval>;
 
@@ -33,6 +38,36 @@ export class App implements OnInit {
   ngOnInit(): void {
     const savedTheme = localStorage.getItem('cq-pulse-theme');
     this.setTheme(savedTheme === 'dark' || (!savedTheme && matchMedia('(prefers-color-scheme: dark)').matches));
+    this.authenticated.set(Boolean(localStorage.getItem('cq-pulse-token')));
+    if (this.authenticated()) this.loadDashboard();
+  }
+
+  protected login(): void {
+    this.loggingIn.set(true);
+    this.loginError.set('');
+    this.http.post<{ accessToken: string }>(`${this.apiUrl}/auth/login`, {
+      email: this.email(), password: this.password()
+    }).subscribe({
+      next: response => {
+        localStorage.setItem('cq-pulse-token', response.accessToken);
+        this.password.set('');
+        this.authenticated.set(true);
+        this.loggingIn.set(false);
+        this.loadDashboard();
+      },
+      error: () => {
+        this.loggingIn.set(false);
+        this.loginError.set('Sign in failed. Check the development administrator credentials.');
+      }
+    });
+  }
+
+  protected logout(): void {
+    localStorage.removeItem('cq-pulse-token');
+    this.authenticated.set(false);
+  }
+
+  private loadDashboard(): void {
     this.http.get<Project[]>(`${this.apiUrl}/projects`).subscribe({
       next: projects => {
         this.projects.set(projects);

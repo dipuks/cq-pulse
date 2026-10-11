@@ -1,3 +1,12 @@
+<main class="login-page" *ngIf="!authenticated(); else application">
+  <section class="login-card"><a class="brand" href="#"><span>CQ</span> Pulse<small>Cloud QA</small></a>
+    <p class="eyebrow">SECURE WORKSPACE</p><h1>Welcome back</h1><p class="intro">Sign in to manage your quality operations.</p>
+    <label>Email<input type="email" [ngModel]="email()" (ngModelChange)="email.set($event)" placeholder="you@example.test"></label>
+    <label>Password<input type="password" [ngModel]="password()" (ngModelChange)="password.set($event)" placeholder="Your development password"></label>
+    <p class="error" *ngIf="loginError()">{{ loginError() }}</p><button class="primary wide" (click)="login()" [disabled]="loggingIn()">{{ loggingIn() ? 'Signing in…' : 'Sign in' }}</button>
+  </section>
+</main>
+<ng-template #application>
 <main class="shell">
   <aside class="sidebar">
     <a class="brand" href="#"><span>CQ</span> Pulse<small>Cloud QA</small></a>
@@ -5,7 +14,7 @@
     <div class="sidebar-note"><strong>Ready to scale</strong><br>Run realistic test workloads with bounded concurrency.</div>
   </aside>
   <section class="content">
-    <header><div class="mobile-brand">CQ Pulse</div><div class="search">⌕ Search projects, tests, or runs…</div><button class="theme" (click)="setTheme(!isDark())">{{ isDark() ? '☀ Light' : '◐ Dark' }}</button><div class="avatar">JD</div></header>
+    <header><div class="mobile-brand">CQ Pulse</div><div class="search">⌕ Search projects, tests, or runs…</div><button class="theme" (click)="setTheme(!isDark())">{{ isDark() ? '☀ Light' : '◐ Dark' }}</button><button class="theme" (click)="logout()">Sign out</button><div class="avatar">JD</div></header>
     <section class="hero"><div><p class="eyebrow">QUALITY COMMAND CENTER</p><h1>See every run.<br><em>Know every risk.</em></h1><p class="intro">Orchestrate high-volume test simulations, monitor execution in real time, and turn results into confident decisions.</p></div><button class="primary" (click)="startSimulation()" [disabled]="isStarting() || !selectedProjectId()">{{ isStarting() ? 'Starting…' : '▶ Start simulation' }}</button></section>
     <p class="error" *ngIf="error()">{{ error() }}</p>
     <section class="metrics">
@@ -28,3 +37,4 @@
     <section class="panel projects"><div class="panel-title"><div><p class="eyebrow">PROJECTS</p><h2>Your quality portfolio</h2></div><button class="text-button">View all →</button></div><div class="project-list"><div *ngFor="let project of projects()" class="project"><span class="project-icon">◈</span><div><strong>{{ project.name }}</strong><small>{{ project.description }}</small></div><span class="active-pill">Active</span></div><div *ngIf="!projects().length" class="empty">Start the API to load your development projects.</div></div></section>
   </section>
 </main>
+</ng-template>
