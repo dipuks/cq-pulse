@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Threading.Channels;
 using CQPulse.Application.Simulation;
 using CQPulse.Domain;
 using CQPulse.Domain.Entities;
@@ -39,7 +40,12 @@ internal sealed class SimulationWorker(
         run.Start(DateTimeOffset.UtcNow);
         await db.SaveChangesAsync(stoppingToken);
         var cancellationToken = cancellations.Register(runId, stoppingToken);
-        var results = new ConcurrentBag<TestCaseResult>();
+        var results = Channel.CreateBounded<TestCaseResult>(new BoundedChannelOptions(2_000)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true
+        });
+        var persistenceTask = PersistResultsAsync(results.Reader, stoppingToken);
         var counters = new int[3];
         var completed = 0;
         try
@@ -59,13 +65,13 @@ internal sealed class SimulationWorker(
                         ? request.FailureCategories![random.Next(request.FailureCategories.Count)] : (FailureCategory?)null;
                     Interlocked.Increment(ref counters[(int)outcome]);
                     var current = Interlocked.Increment(ref completed);
-                    results.Add(new TestCaseResult
+                    await results.Writer.WriteAsync(new TestCaseResult
                     {
                         TestRunId = run.Id, TestCaseNameSnapshot = $"Generated test {index:N0}", Outcome = outcome,
                         StartedAtUtc = DateTimeOffset.UtcNow.AddMilliseconds(-duration), CompletedAtUtc = DateTimeOffset.UtcNow,
                         DurationMs = duration, ErrorMessage = outcome == TestOutcome.Failed ? $"Simulated {category} failure." : null,
                         FailureCategory = category
-                    });
+                    }, token);
                     if (current == run.TotalTests || current % Math.Max(1, run.TotalTests / 100) == 0)
                     {
                         await publisher.PublishAsync(new RunProgress(runId, RunStatus.Running, run.TotalTests, current,
@@ -74,7 +80,8 @@ internal sealed class SimulationWorker(
                     }
                 });
 
-            db.TestCaseResults.AddRange(results);
+            results.Writer.TryComplete();
+            await persistenceTask;
             run.CompletedTests = run.TotalTests;
             run.PassedCount = counters[(int)TestOutcome.Passed];
             run.FailedCount = counters[(int)TestOutcome.Failed];
@@ -86,11 +93,45 @@ internal sealed class SimulationWorker(
         }
         catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
         {
+            results.Writer.TryComplete();
+            await persistenceTask;
             db.ChangeTracker.Clear();
             var cancelledRun = await db.TestRuns.SingleAsync(x => x.Id == runId, CancellationToken.None);
             await publisher.PublishAsync(new RunProgress(runId, cancelledRun.Status, cancelledRun.TotalTests, completed,
                 counters[(int)TestOutcome.Passed], counters[(int)TestOutcome.Failed], counters[(int)TestOutcome.Skipped], null), CancellationToken.None);
         }
-        finally { cancellations.Remove(runId); }
+        finally
+        {
+            results.Writer.TryComplete();
+            cancellations.Remove(runId);
+        }
+    }
+
+    private async Task PersistResultsAsync(ChannelReader<TestCaseResult> reader, CancellationToken cancellationToken)
+    {
+        using var scope = scopeFactory.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<CQPulseDbContext>();
+        var batch = new List<TestCaseResult>(500);
+        await foreach (var result in reader.ReadAllAsync(cancellationToken))
+        {
+            batch.Add(result);
+            if (batch.Count == 500)
+            {
+                await SaveBatchAsync(dbContext, batch, cancellationToken);
+            }
+        }
+
+        if (batch.Count > 0) await SaveBatchAsync(dbContext, batch, cancellationToken);
+    }
+
+    private static async Task SaveBatchAsync(
+        CQPulseDbContext dbContext,
+        List<TestCaseResult> batch,
+        CancellationToken cancellationToken)
+    {
+        dbContext.TestCaseResults.AddRange(batch);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        dbContext.ChangeTracker.Clear();
+        batch.Clear();
     }
 }
