@@ -1,0 +1,30 @@
+<main class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="#"><span>CQ</span> Pulse<small>Cloud QA</small></a>
+    <nav><a class="active">▣ Dashboard</a><a>▤ Projects</a><a>▣ Test Suites</a><a>✓ Test Cases</a><a>▷ Test Runs</a><a>◈ Simulator</a><a>⌁ Analytics</a><a>⚙ Settings</a></nav>
+    <div class="sidebar-note"><strong>Ready to scale</strong><br>Run realistic test workloads with bounded concurrency.</div>
+  </aside>
+  <section class="content">
+    <header><div class="mobile-brand">CQ Pulse</div><div class="search">⌕ Search projects, tests, or runs…</div><button class="theme" (click)="setTheme(!isDark())">{{ isDark() ? '☀ Light' : '◐ Dark' }}</button><div class="avatar">JD</div></header>
+    <section class="hero"><div><p class="eyebrow">QUALITY COMMAND CENTER</p><h1>See every run.<br><em>Know every risk.</em></h1><p class="intro">Orchestrate high-volume test simulations, monitor execution in real time, and turn results into confident decisions.</p></div><button class="primary" (click)="startSimulation()" [disabled]="isStarting() || !selectedProjectId()">{{ isStarting() ? 'Starting…' : '▶ Start simulation' }}</button></section>
+    <p class="error" *ngIf="error()">{{ error() }}</p>
+    <section class="metrics">
+      <article><span class="metric-icon blue">◈</span><small>Projects</small><strong>{{ projects().length }}</strong><i>Active workspaces</i></article>
+      <article><span class="metric-icon violet">✓</span><small>Simulator</small><strong>{{ activeRun()?.totalTests || '—' }}</strong><i>Tests in current run</i></article>
+      <article><span class="metric-icon teal">↗</span><small>Passed</small><strong>{{ activeRun()?.passedCount || '—' }}</strong><i>Completed successfully</i></article>
+      <article><span class="metric-icon orange">!</span><small>Failures</small><strong>{{ activeRun()?.failedCount || '—' }}</strong><i>Need investigation</i></article>
+    </section>
+    <section class="grid">
+      <article class="panel simulator"><div class="panel-title"><div><p class="eyebrow">TEST DATA SIMULATOR</p><h2>Configure a workload</h2></div><span class="tag">Live backend</span></div>
+        <label>Target project<select [ngModel]="selectedProjectId()" (ngModelChange)="selectedProjectId.set($event)"><option *ngFor="let project of projects()" [value]="project.id">{{ project.name }}</option></select></label>
+        <div class="two-col"><label>Simulated tests<input type="number" min="1" max="50000" [ngModel]="testCount()" (ngModelChange)="testCount.set(+$event)"></label><label>Concurrency<input value="12" disabled></label></div>
+        <div class="distribution"><span>Passed <b>88%</b></span><span>Failed <b>8%</b></span><span>Skipped <b>4%</b></span></div><button class="primary wide" (click)="startSimulation()" [disabled]="isStarting() || !selectedProjectId()">Generate & run</button>
+      </article>
+      <article class="panel execution"><div class="panel-title"><div><p class="eyebrow">LIVE EXECUTION</p><h2>{{ activeRun() ? activeRun()!.status : 'Awaiting workload' }}</h2></div><span class="status">{{ activeRun() ? activeRun()!.status : 'Idle' }}</span></div>
+        <div class="ring"><strong>{{ activeRun() ? ((activeRun()!.completedTests / activeRun()!.totalTests) * 100 | number:'1.0-0') : 0 }}%</strong><small>complete</small></div><div class="progress"><span [style.width.%]="activeRun() ? (activeRun()!.completedTests / activeRun()!.totalTests) * 100 : 0"></span></div>
+        <div class="run-stats"><div><small>Completed</small><strong>{{ activeRun()?.completedTests || 0 }}</strong></div><div><small>Passed</small><strong>{{ activeRun()?.passedCount || 0 }}</strong></div><div><small>Failed</small><strong>{{ activeRun()?.failedCount || 0 }}</strong></div></div>
+      </article>
+    </section>
+    <section class="panel projects"><div class="panel-title"><div><p class="eyebrow">PROJECTS</p><h2>Your quality portfolio</h2></div><button class="text-button">View all →</button></div><div class="project-list"><div *ngFor="let project of projects()" class="project"><span class="project-icon">◈</span><div><strong>{{ project.name }}</strong><small>{{ project.description }}</small></div><span class="active-pill">Active</span></div><div *ngIf="!projects().length" class="empty">Start the API to load your development projects.</div></div></section>
+  </section>
+</main>

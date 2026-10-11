@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CQPulse.Api/CQPulse.Api.csproj" />
+    <Project Path="src/CQPulse.Application/CQPulse.Application.csproj" />
+    <Project Path="src/CQPulse.Domain/CQPulse.Domain.csproj" />
+    <Project Path="src/CQPulse.Infrastructure/CQPulse.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CQPulse.IntegrationTests/CQPulse.IntegrationTests.csproj" />
+    <Project Path="tests/CQPulse.UnitTests/CQPulse.UnitTests.csproj" />
+  </Folder>
+</Solution>
