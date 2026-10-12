@@ -1,57 +1,18 @@
-<main class="login-page" *ngIf="!authenticated(); else application">
-  <section class="login-card"><a class="brand" href="#"><span>CQ</span> Pulse<small>Cloud QA</small></a>
-    <p class="eyebrow">SECURE WORKSPACE</p><h1>Welcome back</h1><p class="intro">Sign in to manage your quality operations.</p>
-    <label>Email<input type="email" [ngModel]="email()" (ngModelChange)="email.set($event)" placeholder="you@example.test"></label>
-    <label>Password<input type="password" [ngModel]="password()" (ngModelChange)="password.set($event)" placeholder="Your development password"></label>
-    <p class="error" *ngIf="loginError()">{{ loginError() }}</p><button class="primary wide" (click)="login()" [disabled]="loggingIn()">{{ loggingIn() ? 'Signing in…' : 'Sign in' }}</button>
-  </section>
-</main>
-<ng-template #application>
 <main class="shell">
   <aside class="sidebar">
-    <a class="brand" href="#"><span>CQ</span> Pulse<small>Cloud QA</small></a>
-    <nav><button [class.active]="activeSection() === 'Dashboard'" (click)="navigate('Dashboard')">▣ Dashboard</button><button [class.active]="activeSection() === 'Projects'" (click)="navigate('Projects')">▤ Projects</button><button [class.active]="activeSection() === 'Test Suites'" (click)="navigate('Test Suites')">▣ Test Suites</button><button [class.active]="activeSection() === 'Test Cases'" (click)="navigate('Test Cases')">✓ Test Cases</button><button [class.active]="activeSection() === 'Test Runs'" (click)="navigate('Test Runs')">▷ Test Runs</button><button [class.active]="activeSection() === 'Simulator'" (click)="navigate('Simulator')">◈ Simulator</button><button [class.active]="activeSection() === 'Analytics'" (click)="navigate('Analytics')">⌁ Analytics</button><button [class.active]="activeSection() === 'Settings'" (click)="navigate('Settings')">⚙ Settings</button></nav>
-    <div class="sidebar-note"><strong>Ready to scale</strong><br>Run realistic test workloads with bounded concurrency.</div>
+    <a class="brand" routerLink="/dashboard"><span>CQ</span> Pulse<small>CLOUD QA</small></a>
+    <nav>
+      <a routerLink="/dashboard" routerLinkActive="active">▣ Dashboard</a>
+      <a routerLink="/projects" routerLinkActive="active">▤ Projects</a>
+      <a routerLink="/runs" routerLinkActive="active">▷ Test runs</a>
+      <a routerLink="/simulator" routerLinkActive="active">◈ Simulator</a>
+      <a routerLink="/analytics" routerLinkActive="active">⌁ Analytics</a>
+      <a routerLink="/settings" routerLinkActive="active">⚙ Settings</a>
+    </nav>
+    <div class="sidebar-note"><strong>Ready to scale</strong><br>Run realistic workloads with bounded concurrency.</div>
   </aside>
   <section class="content">
-    <header><div class="mobile-brand">CQ Pulse</div><div class="search">⌕ Search projects, tests, or runs…</div><button class="theme" (click)="setTheme(!isDark())">{{ isDark() ? '☀ Light' : '◐ Dark' }}</button><button class="theme" (click)="logout()">Sign out</button><div class="avatar">JD</div></header>
-    <section class="section-banner" *ngIf="activeSection() !== 'Dashboard'"><p class="eyebrow">{{ activeSection().toUpperCase() }}</p><h1>{{ activeSection() }}</h1><p class="intro">This workspace is connected to the CQ Pulse API foundation. Dashboard controls and simulator execution remain available while the dedicated routed workflow is being completed.</p><button class="primary" (click)="navigate('Dashboard')">Return to dashboard</button></section>
-    <div class="dashboard-content" [class.page-hidden]="activeSection() !== 'Dashboard'">
-    <section class="hero"><div><p class="eyebrow">QUALITY COMMAND CENTER</p><h1>See every run.<br><em>Know every risk.</em></h1><p class="intro">Orchestrate high-volume test simulations, monitor execution in real time, and turn results into confident decisions.</p><div class="hero-pills"><span>◈ Real-time execution</span><span>◌ Configurable outcomes</span><span>✓ Persisted analytics</span></div></div><button class="primary" (click)="startSimulation()" [disabled]="isStarting() || !selectedProjectId()">{{ isStarting() ? 'Starting…' : '▶ Start simulation' }}</button></section>
-    <p class="error" *ngIf="error()">{{ error() }}</p>
-    <section class="metrics">
-      <article><span class="metric-icon blue">◈</span><small>Projects</small><strong>{{ summary()?.projectCount ?? projects().length }}</strong><i>Active workspaces</i></article>
-      <article><span class="metric-icon violet">✓</span><small>Test cases</small><strong>{{ summary()?.testCaseCount ?? '—' }}</strong><i>Managed tests</i></article>
-      <article><span class="metric-icon teal">↗</span><small>Passed</small><strong>{{ summary()?.passed ?? '—' }}</strong><i>{{ summary()?.passRate ?? 0 }}% pass rate</i></article>
-      <article><span class="metric-icon orange">!</span><small>Failures</small><strong>{{ summary()?.failed ?? '—' }}</strong><i>Need investigation</i></article>
-    </section>
-    <section class="grid">
-      <article class="panel simulator"><div class="panel-title"><div><p class="eyebrow">TEST DATA SIMULATOR</p><h2>Configure a workload</h2></div><span class="tag">Live backend</span></div>
-        <label>Target project<select [ngModel]="selectedProjectId()" (ngModelChange)="selectedProjectId.set($event)"><option *ngFor="let project of projects()" [value]="project.id">{{ project.name }}</option></select></label>
-        <div class="two-col"><label>Simulated tests<input type="number" min="1" max="50000" [ngModel]="testCount()" (ngModelChange)="testCount.set(+$event)"></label><label>Concurrency<input value="12" disabled></label></div>
-        <div class="outcomes"><label>Pass %<input type="number" min="0" max="100" [ngModel]="passPercentage()" (ngModelChange)="passPercentage.set(+$event)"></label><label>Failure %<input type="number" min="0" max="100" [ngModel]="failurePercentage()" (ngModelChange)="failurePercentage.set(+$event)"></label><label>Skipped %<input type="number" min="0" max="100" [ngModel]="skippedPercentage()" (ngModelChange)="skippedPercentage.set(+$event)"></label></div><button class="primary wide" (click)="startSimulation()" [disabled]="isStarting() || !selectedProjectId()">Generate & run</button>
-      </article>
-      <article class="panel execution"><div class="panel-title"><div><p class="eyebrow">LIVE EXECUTION</p><h2>{{ activeRun() ? activeRun()!.status : 'Awaiting workload' }}</h2></div><span class="status">{{ activeRun() ? activeRun()!.status : 'Idle' }}</span></div>
-        <div class="ring"><strong>{{ activeRun() ? ((activeRun()!.completedTests / activeRun()!.totalTests) * 100 | number:'1.0-0') : 0 }}%</strong><small>complete</small></div><div class="progress"><span [style.width.%]="activeRun() ? (activeRun()!.completedTests / activeRun()!.totalTests) * 100 : 0"></span></div>
-        <div class="run-stats"><div><small>Completed</small><strong>{{ activeRun()?.completedTests || 0 }}</strong></div><div><small>Passed</small><strong>{{ activeRun()?.passedCount || 0 }}</strong></div><div><small>Failed</small><strong>{{ activeRun()?.failedCount || 0 }}</strong></div></div>
-      </article>
-    </section>
-    <section class="analytics-grid">
-      <article class="panel trend-panel"><div class="panel-title"><div><p class="eyebrow">EXECUTION PULSE</p><h2>Quality trend</h2></div><span class="tag">Persisted data</span></div>
-        <div class="legend"><span class="legend-pass">● Passed {{ summary()?.passed ?? 0 }}</span><span class="legend-fail">● Failed {{ summary()?.failed ?? 0 }}</span><span class="legend-skip">● Skipped {{ summary()?.skipped ?? 0 }}</span></div>
-        <div class="chart"><svg viewBox="0 0 600 190" preserveAspectRatio="none" aria-label="Execution outcome trend"><defs><linearGradient id="area" x1="0" x2="0" y1="0" y2="1"><stop stop-color="#2878f0" stop-opacity=".32"/><stop offset="1" stop-color="#2878f0" stop-opacity="0"/></linearGradient></defs><path d="M0 150 C55 128 75 120 125 130 S205 65 260 98 S350 56 405 88 S500 35 600 55 L600 190 L0 190 Z" fill="url(#area)"/><path d="M0 150 C55 128 75 120 125 130 S205 65 260 98 S350 56 405 88 S500 35 600 55" fill="none" stroke="#2878f0" stroke-width="4"/><path d="M0 160 C80 158 130 150 180 155 S300 135 360 145 S490 125 600 130" fill="none" stroke="#e45b70" stroke-width="3" stroke-dasharray="7 7"/></svg></div>
-        <div class="chart-labels"><span>Run 1</span><span>Run 2</span><span>Run 3</span><span>Latest</span></div>
-      </article>
-      <article class="panel distribution-panel"><div class="panel-title"><div><p class="eyebrow">OUTCOME MIX</p><h2>Result distribution</h2></div><span class="pass-rate">{{ summary()?.passRate ?? 0 }}% pass</span></div>
-        <div class="donut-wrap"><div class="donut" [style.background]="'conic-gradient(#16b7a5 0 ' + (summary()?.passRate ?? 0) + '%, #e45b70 ' + (summary()?.passRate ?? 0) + '% ' + ((summary()?.passRate ?? 0) + 15) + '%, #f1ad32 0 100%)'"><div><strong>{{ summary()?.passRate ?? 0 }}%</strong><small>passed</small></div></div><div class="outcome-list"><span><i class="dot pass"></i>Passed <b>{{ summary()?.passed ?? 0 }}</b></span><span><i class="dot fail"></i>Failed <b>{{ summary()?.failed ?? 0 }}</b></span><span><i class="dot skip"></i>Skipped <b>{{ summary()?.skipped ?? 0 }}</b></span></div></div>
-      </article>
-    </section>
-    <section class="insights-grid">
-      <article class="panel failure-panel"><div class="panel-title"><div><p class="eyebrow">FAILURE INVESTIGATION</p><h2>Failure categories</h2></div><button class="text-button">View details →</button></div><div class="failure-row" *ngFor="let failure of failureBreakdown()"><span>{{ failure.category }}</span><div><i [style.width.%]="summary()?.failed ? (failure.count / summary()!.failed!) * 100 : 0"></i></div><b>{{ failure.count }}</b></div><div class="empty" *ngIf="!failureBreakdown().length">No persisted failures match this period.</div></article>
-      <article class="panel activity-panel"><div class="panel-title"><div><p class="eyebrow">RUN ACTIVITY</p><h2>Latest execution</h2></div><span class="status">{{ activeRun()?.status || 'Ready' }}</span></div><div class="activity"><span class="activity-icon">▶</span><div><strong>{{ activeRun()?.status || 'Ready to simulate' }}</strong><small>{{ activeRun() ? (activeRun()!.completedTests + ' of ' + activeRun()!.totalTests + ' tests processed') : 'Configure a workload to begin.' }}</small></div></div><div class="activity"><span class="activity-icon teal-bg">◈</span><div><strong>{{ summary()?.totalRuns || 0 }} total runs</strong><small>Results are stored in your local SQL Server.</small></div></div></article>
-    </section>
-    <section class="panel projects"><div class="panel-title"><div><p class="eyebrow">PROJECTS</p><h2>Your quality portfolio</h2></div><button class="text-button">View all →</button></div><div class="project-list"><div *ngFor="let project of projects()" class="project"><span class="project-icon">◈</span><div><strong>{{ project.name }}</strong><small>{{ project.description }}</small></div><span class="active-pill">Active</span></div><div *ngIf="!projects().length" class="empty">Start the API to load your development projects.</div></div></section>
-    </div>
+    <header><a class="mobile-brand" routerLink="/dashboard">CQ Pulse</a><span class="header-caption">Quality operations workspace</span><button class="theme" (click)="toggleTheme()">{{ dark() ? '☀ Light' : '◐ Dark' }}</button><button class="theme" (click)="signOut()">Sign out</button><span class="avatar">CQ</span></header>
+    <router-outlet />
   </section>
 </main>
-</ng-template>
