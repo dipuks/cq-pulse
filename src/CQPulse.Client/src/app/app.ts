@@ -9,6 +9,7 @@ interface PageResponse<T> { items: T[]; totalCount: number; page: number; pageSi
 interface Run { id: string; status: string; totalTests: number; completedTests: number; passedCount: number; failedCount: number; skippedCount: number; }
 interface RunProgress { runId: string; status: string; totalTests: number; completedTests: number; passedCount: number; failedCount: number; skippedCount: number; }
 interface DashboardSummary { projectCount: number; testSuiteCount: number; testCaseCount: number; totalRuns?: number; passed?: number; failed?: number; skipped?: number; activeRuns?: number; passRate: number; }
+interface FailureBreakdown { category: string; count: number; }
 
 @Component({
   selector: 'app-root',
@@ -28,6 +29,7 @@ export class App implements OnInit, OnDestroy {
   protected readonly error = signal('');
   protected readonly activeRun = signal<Run | null>(null);
   protected readonly summary = signal<DashboardSummary | null>(null);
+  protected readonly failureBreakdown = signal<FailureBreakdown[]>([]);
   protected readonly authenticated = signal(false);
   protected readonly activeSection = signal('Dashboard');
   protected readonly email = signal('');
@@ -91,6 +93,7 @@ export class App implements OnInit, OnDestroy {
       error: () => this.error.set('Unable to reach the CQ Pulse API. Start the API at https://localhost:7256.')
     });
     this.refreshSummary();
+    this.refreshAnalytics();
   }
 
   protected setTheme(dark: boolean): void {
@@ -125,6 +128,7 @@ export class App implements OnInit, OnDestroy {
       next: run => {
         this.activeRun.set(run);
         this.refreshSummary();
+        this.refreshAnalytics();
         if (['Passed', 'CompletedWithFailures', 'Failed', 'Cancelled'].includes(run.status) && this.poller) {
           clearInterval(this.poller);
           this.poller = undefined;
@@ -172,6 +176,12 @@ export class App implements OnInit, OnDestroy {
   private refreshSummary(): void {
     this.http.get<DashboardSummary>(`${this.apiUrl}/dashboard/summary`).subscribe({
       next: summary => this.summary.set(summary)
+    });
+  }
+
+  private refreshAnalytics(): void {
+    this.http.get<FailureBreakdown[]>(`${this.apiUrl}/analytics/failure-breakdown`).subscribe({
+      next: breakdown => this.failureBreakdown.set(breakdown)
     });
   }
 }
