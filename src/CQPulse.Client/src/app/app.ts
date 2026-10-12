@@ -90,7 +90,15 @@ export class App implements OnInit, OnDestroy {
         this.projects.set(response.items);
         if (response.items[0]) this.selectedProjectId.set(response.items[0].id);
       },
-      error: () => this.error.set('Unable to reach the CQ Pulse API. Start the API at https://localhost:7256.')
+      error: response => {
+        if (response.status === 401) {
+          this.logout();
+          this.loginError.set('Your session has expired. Please sign in again.');
+          return;
+        }
+
+        this.error.set('Unable to reach the CQ Pulse API. Verify that it is running at https://localhost:7256.');
+      }
     });
     this.refreshSummary();
     this.refreshAnalytics();
