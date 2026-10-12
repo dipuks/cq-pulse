@@ -50,3 +50,13 @@ npm run build
 The Angular SignalR client production build passed after adding `@microsoft/signalr`. Existing backend unit/integration suites remain limited to four placeholder/lifecycle tests; dedicated simulator performance tests are still required.
 
 Authorization smoke test after registering `AddAuthorization`: anonymous `/api/projects` and `/hubs/runs/negotiate` returned `401`; anonymous `/health` remained `200`.
+
+## Frontend navigation audit — 2026-10-11
+
+- `src/CQPulse.Client/src/app/app.routes.ts` exports an empty routes array. Angular Router is not configured in `app.config.ts`.
+- The full authenticated UI, login, dashboard, simulator controls, navigation, SignalR client, and API calls live in one `App` component. Sidebar buttons only set `activeSection`; non-dashboard content is an explicit incomplete-workflow banner.
+- No `AuthGuard`, typed API services, feature components, routed run history/detail pages, project management pages, or nested-route refresh handling exists.
+- Existing secured API coverage is usable for route implementation: projects (list/get/create/update), project suites, suite cases, simulator preview/runs/cancel/run state, filtered paginated runs/details/results/logs, dashboard summary, analytics, and authentication.
+- The SignalR client uses `/hubs/runs`, `JoinRun`, and `RunProgressUpdated` with a query-token factory. The displayed fallback warning is emitted only by the client connection catch; browser network/server logs must be inspected after route migration before claiming a hub defect.
+
+**Required corrective action:** extract a shared shell, configure protected Angular routes, and implement feature pages against the existing APIs. The current sidebar is not a valid implementation of the agreed navigation requirements.
