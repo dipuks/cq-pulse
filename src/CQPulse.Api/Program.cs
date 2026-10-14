@@ -2,6 +2,8 @@ using CQPulse.Infrastructure;
 using CQPulse.Application.Simulation;
 using CQPulse.Api.Hubs;
 using CQPulse.Api.Auth;
+using CQPulse.Api.Errors;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using System.Text.Json.Serialization;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -13,8 +15,10 @@ builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
-builder.Services.AddHealthChecks();
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddCQPulseInfrastructure(builder.Configuration);
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<CQPulse.Infrastructure.Persistence.CQPulseDbContext>("database", tags: ["ready"]);
 builder.Services.AddSignalR();
 builder.Services.AddScoped<IRunProgressPublisher, SignalRRunProgressPublisher>();
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
@@ -64,12 +68,13 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<RunsHub>("/hubs/runs");
-app.MapHealthChecks("/health");
-app.MapHealthChecks("/health/ready");
-app.MapOpenApi();
+// Liveness: the process is up. Readiness: dependencies (the database) are reachable.
+app.MapHealthChecks("/health", new HealthCheckOptions { Predicate = _ => false });
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
 
 if (app.Environment.IsDevelopment())
 {
+    app.MapOpenApi();
     await using var scope = app.Services.CreateAsyncScope();
     await CQPulse.Infrastructure.Persistence.DevelopmentDataSeeder.SeedAsync(
         scope.ServiceProvider.GetRequiredService<CQPulse.Infrastructure.Persistence.CQPulseDbContext>(),

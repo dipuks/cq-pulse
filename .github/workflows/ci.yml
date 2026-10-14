@@ -8,6 +8,22 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    env:
+      # Throwaway password for the job-scoped SQL Server container below; not a real secret.
+      SQL_SA_PASSWORD: CQPulse-ci-${{ github.run_id }}-Aa1!
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: CQPulse-ci-${{ github.run_id }}-Aa1!
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' -b"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -15,7 +31,10 @@ jobs:
           dotnet-version: 10.0.x
       - run: dotnet restore CQPulse.slnx
       - run: dotnet build CQPulse.slnx --no-restore --configuration Release
-      - run: dotnet test CQPulse.slnx --no-build --configuration Release
+      - name: Test (integration tests use temporary CQPulse_Tests_* databases on the service container)
+        env:
+          CQPULSE_TEST_SQL: Server=localhost,1433;User Id=sa;Password=${{ env.SQL_SA_PASSWORD }};TrustServerCertificate=True;MultipleActiveResultSets=True
+        run: dotnet test CQPulse.slnx --no-build --configuration Release
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -30,3 +49,4 @@ jobs:
           cache-dependency-path: src/CQPulse.Client/package-lock.json
       - run: npm ci
       - run: npm run build
+      - run: npm test -- --watch=false

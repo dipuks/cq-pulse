@@ -1,4 +1,6 @@
+using CQPulse.Application.Analytics;
 using CQPulse.Domain;
+using CQPulse.Domain.Entities;
 using CQPulse.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -6,48 +8,45 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CQPulse.Api.Controllers;
 
+/// <summary>Aggregates over persisted test-case results, filtered by <c>CompletedAtUtc</c>.</summary>
 [ApiController]
 [Authorize(Roles = "Administrator")]
 [Route("api/analytics")]
 public sealed class AnalyticsController(CQPulseDbContext dbContext) : ControllerBase
 {
     [HttpGet("summary")]
-    public async Task<ActionResult<object>> Summary(
+    public async Task<AnalyticsSummaryDto> Summary(
         DateTimeOffset? fromUtc,
         DateTimeOffset? toUtc,
         Guid? projectId,
         CancellationToken cancellationToken)
     {
-        var results = FilterResults(fromUtc, toUtc, projectId);
-        var totals = await results.GroupBy(_ => 1).Select(group => new
+        var totals = await FilterResults(fromUtc, toUtc, projectId).GroupBy(_ => 1).Select(group => new
         {
             Passed = group.Count(x => x.Outcome == TestOutcome.Passed),
             Failed = group.Count(x => x.Outcome == TestOutcome.Failed),
             Skipped = group.Count(x => x.Outcome == TestOutcome.Skipped),
             AverageDurationMs = group.Average(x => (double)x.DurationMs)
         }).SingleOrDefaultAsync(cancellationToken);
-        var total = (totals?.Passed ?? 0) + (totals?.Failed ?? 0) + (totals?.Skipped ?? 0);
-        return Ok(new
-        {
-            Total = total,
-            totals?.Passed,
-            totals?.Failed,
-            totals?.Skipped,
-            PassRate = total == 0 ? 0 : Math.Round((double)(totals?.Passed ?? 0) / total * 100, 1),
-            FailureRate = total == 0 ? 0 : Math.Round((double)(totals?.Failed ?? 0) / total * 100, 1),
-            totals?.AverageDurationMs
-        });
+        if (totals is null) return new AnalyticsSummaryDto(0, 0, 0, 0, 0, 0, null);
+
+        var total = totals.Passed + totals.Failed + totals.Skipped;
+        return new AnalyticsSummaryDto(
+            total, totals.Passed, totals.Failed, totals.Skipped,
+            DashboardController.Percentage(totals.Passed, total),
+            DashboardController.Percentage(totals.Failed, total),
+            totals.AverageDurationMs);
     }
 
     [HttpGet("execution-trends")]
-    public async Task<ActionResult<object>> Trends(
+    public async Task<IReadOnlyList<TrendPointDto>> Trends(
         DateTimeOffset? fromUtc,
         DateTimeOffset? toUtc,
         Guid? projectId,
         CancellationToken cancellationToken)
     {
-        var results = FilterResults(fromUtc, toUtc, projectId);
-        var items = await results.GroupBy(x => x.CompletedAtUtc.Date)
+        var rows = await FilterResults(fromUtc, toUtc, projectId)
+            .GroupBy(x => x.CompletedAtUtc.Date)
             .OrderBy(x => x.Key)
             .Select(group => new
             {
@@ -57,29 +56,26 @@ public sealed class AnalyticsController(CQPulseDbContext dbContext) : Controller
                 Skipped = group.Count(x => x.Outcome == TestOutcome.Skipped),
                 AverageDurationMs = group.Average(x => (double)x.DurationMs)
             }).ToListAsync(cancellationToken);
-        return Ok(items);
+        return rows.Select(x => new TrendPointDto(DateOnly.FromDateTime(x.Date), x.Passed, x.Failed, x.Skipped, x.AverageDurationMs)).ToList();
     }
 
     [HttpGet("failure-breakdown")]
-    public async Task<ActionResult<object>> FailureBreakdown(
+    public async Task<IReadOnlyList<FailureCategoryCountDto>> FailureBreakdown(
         DateTimeOffset? fromUtc,
         DateTimeOffset? toUtc,
         Guid? projectId,
         CancellationToken cancellationToken)
     {
-        var failures = FilterResults(fromUtc, toUtc, projectId)
-            .Where(x => x.Outcome == TestOutcome.Failed && x.FailureCategory != null);
-        var items = await failures.GroupBy(x => x.FailureCategory)
-            .OrderByDescending(x => x.Count())
+        var rows = await FilterResults(fromUtc, toUtc, projectId)
+            .Where(x => x.Outcome == TestOutcome.Failed && x.FailureCategory != null)
+            .GroupBy(x => x.FailureCategory!.Value)
             .Select(group => new { Category = group.Key, Count = group.Count() })
+            .OrderByDescending(x => x.Count).ThenBy(x => x.Category)
             .ToListAsync(cancellationToken);
-        return Ok(items);
+        return rows.Select(x => new FailureCategoryCountDto(x.Category, x.Count)).ToList();
     }
 
-    private IQueryable<CQPulse.Domain.Entities.TestCaseResult> FilterResults(
-        DateTimeOffset? fromUtc,
-        DateTimeOffset? toUtc,
-        Guid? projectId)
+    private IQueryable<TestCaseResult> FilterResults(DateTimeOffset? fromUtc, DateTimeOffset? toUtc, Guid? projectId)
     {
         var query = dbContext.TestCaseResults.AsNoTracking().AsQueryable();
         if (fromUtc is not null) query = query.Where(x => x.CompletedAtUtc >= fromUtc);

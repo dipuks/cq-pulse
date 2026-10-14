@@ -1,11 +1,17 @@
 using System.Threading.Channels;
+using CQPulse.Application.Simulation;
+using Microsoft.Extensions.Options;
 
 namespace CQPulse.Infrastructure.Simulator;
 
-internal sealed class SimulationQueue
+/// <summary>
+/// In-process, bounded run queue. Not durable: queued run IDs are lost on restart, and
+/// <see cref="ExecutionRecoveryService"/> marks those runs failed at the next startup.
+/// </summary>
+internal sealed class SimulationQueue(IOptions<SimulatorOptions> options)
 {
     private readonly Channel<Guid> _channel = Channel.CreateBounded<Guid>(
-        new BoundedChannelOptions(100)
+        new BoundedChannelOptions(options.Value.QueueCapacity)
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true

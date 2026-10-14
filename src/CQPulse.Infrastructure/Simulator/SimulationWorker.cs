@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading.Channels;
 using CQPulse.Application.Simulation;
@@ -9,129 +8,290 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CQPulse.Infrastructure.Simulator;
 
+/// <summary>
+/// Executes queued runs one at a time: tests run with bounded concurrency, results flow through a bounded
+/// channel (backpressure) to batched persistence, and every run ends in a terminal state whose counters are
+/// computed from the persisted rows. On application shutdown an in-flight run is left for
+/// <see cref="ExecutionRecoveryService"/> to mark failed at the next startup.
+/// </summary>
 internal sealed class SimulationWorker(
     SimulationQueue queue,
     RunCancellationRegistry cancellations,
     IServiceScopeFactory scopeFactory,
+    IResultBatchWriter resultWriter,
+    IOptions<SimulatorOptions> options,
     ILogger<SimulationWorker> logger) : BackgroundService
 {
+    private const int MaxSummaryLength = 1_000;
+    private SimulatorOptions Settings => options.Value;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var runId in queue.ReadAllAsync(stoppingToken))
+        try
         {
-            try { await ProcessAsync(runId, stoppingToken); }
-            catch (Exception exception) { logger.LogError(exception, "Simulation run {RunId} crashed.", runId); }
+            await foreach (var runId in queue.ReadAllAsync(stoppingToken))
+            {
+                using var _ = logger.BeginScope(new Dictionary<string, object> { ["RunId"] = runId });
+                try
+                {
+                    await ProcessAsync(runId, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning("Shutdown interrupted simulation run {RunId}; startup recovery will mark it failed.", runId);
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    logger.LogError(exception, "Simulation run {RunId} crashed.", runId);
+                    await TryMarkFailedAsync(runId, Summarize("Simulation failed unexpectedly", exception));
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown.
         }
     }
 
     private async Task ProcessAsync(Guid runId, CancellationToken stoppingToken)
     {
-        using var scope = scopeFactory.CreateScope();
+        await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CQPulseDbContext>();
         var publisher = scope.ServiceProvider.GetRequiredService<IRunProgressPublisher>();
-        var run = await db.TestRuns.SingleAsync(x => x.Id == runId, stoppingToken);
-        if (run.Status != RunStatus.Queued) return;
-        var request = JsonSerializer.Deserialize<SimulationRequest>(run.ConfigurationSnapshot)
-            ?? throw new InvalidOperationException("Run configuration is invalid.");
+
+        var run = await db.TestRuns.SingleOrDefaultAsync(x => x.Id == runId, stoppingToken);
+        if (run is null)
+        {
+            logger.LogWarning("Queued run {RunId} no longer exists.", runId);
+            return;
+        }
+        if (run.Status != RunStatus.Queued) return; // e.g. cancelled while waiting in the queue
+
+        var request = TryReadConfiguration(run.ConfigurationSnapshot);
+        if (request is null)
+        {
+            run.Fail(DateTimeOffset.UtcNow, "The run configuration could not be read.");
+            await db.SaveChangesAsync(CancellationToken.None);
+            await PublishSafelyAsync(publisher, ToProgress(run, null));
+            return;
+        }
 
         run.Start(DateTimeOffset.UtcNow);
         await db.SaveChangesAsync(stoppingToken);
-        var cancellationToken = cancellations.Register(runId, stoppingToken);
-        var results = Channel.CreateBounded<TestCaseResult>(new BoundedChannelOptions(2_000)
-        {
-            FullMode = BoundedChannelFullMode.Wait,
-            SingleReader = true
-        });
-        var persistenceTask = PersistResultsAsync(results.Reader, stoppingToken);
-        var counters = new int[3];
-        var completed = 0;
+        await PublishSafelyAsync(publisher, ToProgress(run, null));
+        logger.LogInformation("Simulation run {RunId} started: {TestCount} tests, concurrency {Concurrency}.",
+            runId, request.TestCount, request.MaxConcurrency);
+
+        var (executionFailure, persistenceFailure) = await ExecuteAsync(run, request, publisher, stoppingToken);
+        stoppingToken.ThrowIfCancellationRequested();
+
+        await FinishAsync(db, publisher, runId, executionFailure, persistenceFailure);
+    }
+
+    private async Task<(Exception? Execution, Exception? Persistence)> ExecuteAsync(
+        TestRun run, SimulationRequest request, IRunProgressPublisher publisher, CancellationToken stoppingToken)
+    {
+        var runToken = cancellations.Register(run.Id, stoppingToken);
         try
         {
-            await Parallel.ForEachAsync(
-                Enumerable.Range(1, run.TotalTests),
-                new ParallelOptions { MaxDegreeOfParallelism = request.MaxConcurrency, CancellationToken = cancellationToken },
-                async (index, token) =>
-                {
-                    var random = request.RandomSeed is { } seed ? new Random(HashCode.Combine(seed, index)) : Random.Shared;
-                    var duration = random.Next(request.MinimumDurationMs, request.MaximumDurationMs + 1);
-                    await Task.Delay(duration, token);
-                    var roll = random.Next(100);
-                    var outcome = roll < request.PassPercentage ? TestOutcome.Passed :
-                        roll < request.PassPercentage + request.FailurePercentage ? TestOutcome.Failed : TestOutcome.Skipped;
-                    var category = outcome == TestOutcome.Failed
-                        ? request.FailureCategories![random.Next(request.FailureCategories.Count)] : (FailureCategory?)null;
-                    Interlocked.Increment(ref counters[(int)outcome]);
-                    var current = Interlocked.Increment(ref completed);
-                    await results.Writer.WriteAsync(new TestCaseResult
-                    {
-                        TestRunId = run.Id, TestCaseNameSnapshot = $"Generated test {index:N0}", Outcome = outcome,
-                        StartedAtUtc = DateTimeOffset.UtcNow.AddMilliseconds(-duration), CompletedAtUtc = DateTimeOffset.UtcNow,
-                        DurationMs = duration, ErrorMessage = outcome == TestOutcome.Failed ? $"Simulated {category} failure." : null,
-                        FailureCategory = category
-                    }, token);
-                    if (current == run.TotalTests || current % Math.Max(1, run.TotalTests / 100) == 0)
-                    {
-                        await publisher.PublishAsync(new RunProgress(runId, RunStatus.Running, run.TotalTests, current,
-                            counters[(int)TestOutcome.Passed], counters[(int)TestOutcome.Failed], counters[(int)TestOutcome.Skipped],
-                            $"Generated test {index:N0}"), token);
-                    }
-                });
+            using var execution = CancellationTokenSource.CreateLinkedTokenSource(runToken);
+            var results = Channel.CreateBounded<TestCaseResult>(new BoundedChannelOptions(Settings.ResultBufferCapacity)
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true
+            });
+            var persistence = PersistResultsAsync(results.Reader, execution, stoppingToken);
 
-            results.Writer.TryComplete();
-            await persistenceTask;
-            run.CompletedTests = run.TotalTests;
-            run.PassedCount = counters[(int)TestOutcome.Passed];
-            run.FailedCount = counters[(int)TestOutcome.Failed];
-            run.SkippedCount = counters[(int)TestOutcome.Skipped];
-            run.Complete(DateTimeOffset.UtcNow);
-            await db.SaveChangesAsync(stoppingToken);
-            await publisher.PublishAsync(new RunProgress(runId, run.Status, run.TotalTests, run.CompletedTests,
-                run.PassedCount, run.FailedCount, run.SkippedCount, null), stoppingToken);
-        }
-        catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
-        {
-            results.Writer.TryComplete();
-            await persistenceTask;
-            db.ChangeTracker.Clear();
-            var cancelledRun = await db.TestRuns.SingleAsync(x => x.Id == runId, CancellationToken.None);
-            await publisher.PublishAsync(new RunProgress(runId, cancelledRun.Status, cancelledRun.TotalTests, completed,
-                counters[(int)TestOutcome.Passed], counters[(int)TestOutcome.Failed], counters[(int)TestOutcome.Skipped], null), CancellationToken.None);
+            var workload = new SimulationWorkload(request, request.RandomSeed ?? Random.Shared.Next());
+            var counters = new int[3];
+            var completed = 0;
+            var progressStep = Math.Max(1, run.TotalTests / Settings.ProgressUpdatesPerRun);
+
+            Exception? executionFailure = null;
+            try
+            {
+                await Parallel.ForEachAsync(
+                    Enumerable.Range(0, run.TotalTests),
+                    new ParallelOptions { MaxDegreeOfParallelism = request.MaxConcurrency, CancellationToken = execution.Token },
+                    async (index, token) =>
+                    {
+                        var test = workload.Generate(index);
+                        var startedAt = DateTimeOffset.UtcNow;
+                        await Task.Delay(test.DurationMs, token);
+                        var name = $"Generated test {index + 1:N0}";
+                        await results.Writer.WriteAsync(new TestCaseResult
+                        {
+                            TestRunId = run.Id,
+                            TestCaseNameSnapshot = name,
+                            Outcome = test.Outcome,
+                            StartedAtUtc = startedAt,
+                            CompletedAtUtc = DateTimeOffset.UtcNow,
+                            DurationMs = test.DurationMs,
+                            ErrorMessage = test.Outcome == TestOutcome.Failed ? $"Simulated {test.FailureCategory} failure." : null,
+                            FailureCategory = test.FailureCategory
+                        }, token);
+
+                        Interlocked.Increment(ref counters[(int)test.Outcome]);
+                        var current = Interlocked.Increment(ref completed);
+                        if (current == run.TotalTests || current % progressStep == 0)
+                        {
+                            await PublishSafelyAsync(publisher, new RunProgress(run.Id, RunStatus.Running, run.TotalTests, current,
+                                Volatile.Read(ref counters[0]), Volatile.Read(ref counters[1]), Volatile.Read(ref counters[2]), name));
+                        }
+                    });
+            }
+            catch (Exception exception)
+            {
+                executionFailure = exception;
+            }
+            finally
+            {
+                results.Writer.TryComplete();
+            }
+
+            Exception? persistenceFailure = null;
+            try
+            {
+                await persistence;
+            }
+            catch (Exception exception)
+            {
+                persistenceFailure = exception;
+            }
+
+            return (executionFailure, persistenceFailure);
         }
         finally
         {
-            results.Writer.TryComplete();
-            cancellations.Remove(runId);
+            cancellations.Remove(run.Id);
         }
     }
 
-    private async Task PersistResultsAsync(ChannelReader<TestCaseResult> reader, CancellationToken cancellationToken)
+    /// <summary>Drains results in batches. A failure cancels execution so producers never block on a full channel.</summary>
+    private async Task PersistResultsAsync(
+        ChannelReader<TestCaseResult> reader, CancellationTokenSource execution, CancellationToken stoppingToken)
     {
-        using var scope = scopeFactory.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<CQPulseDbContext>();
-        var batch = new List<TestCaseResult>(500);
-        await foreach (var result in reader.ReadAllAsync(cancellationToken))
+        try
         {
-            batch.Add(result);
-            if (batch.Count == 500)
+            var batch = new List<TestCaseResult>(Settings.ResultBatchSize);
+            await foreach (var result in reader.ReadAllAsync(stoppingToken))
             {
-                await SaveBatchAsync(dbContext, batch, cancellationToken);
+                batch.Add(result);
+                if (batch.Count < Settings.ResultBatchSize) continue;
+                await resultWriter.WriteAsync(batch.ToArray(), stoppingToken);
+                batch.Clear();
             }
-        }
 
-        if (batch.Count > 0) await SaveBatchAsync(dbContext, batch, cancellationToken);
+            if (batch.Count > 0) await resultWriter.WriteAsync(batch.ToArray(), stoppingToken);
+        }
+        catch
+        {
+            await execution.CancelAsync();
+            throw;
+        }
     }
 
-    private static async Task SaveBatchAsync(
-        CQPulseDbContext dbContext,
-        List<TestCaseResult> batch,
-        CancellationToken cancellationToken)
+    private async Task FinishAsync(
+        CQPulseDbContext db, IRunProgressPublisher publisher, Guid runId, Exception? executionFailure, Exception? persistenceFailure)
     {
-        dbContext.TestCaseResults.AddRange(batch);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        dbContext.ChangeTracker.Clear();
-        batch.Clear();
+        // Reload: a user cancellation may have been saved by another request while the run executed.
+        db.ChangeTracker.Clear();
+        var run = await db.TestRuns.SingleAsync(x => x.Id == runId, CancellationToken.None);
+        await ApplyPersistedCountsAsync(db, run);
+
+        var now = DateTimeOffset.UtcNow;
+        if (run.Status == RunStatus.Cancelled)
+        {
+            logger.LogInformation("Simulation run {RunId} cancelled after {Completed} tests.", runId, run.CompletedTests);
+        }
+        else if (persistenceFailure is not null)
+        {
+            logger.LogError(persistenceFailure, "Result persistence failed for simulation run {RunId}.", runId);
+            run.Fail(now, Summarize("Result persistence failed", persistenceFailure));
+        }
+        else if (executionFailure is not null)
+        {
+            logger.LogError(executionFailure, "Simulation run {RunId} failed during execution.", runId);
+            run.Fail(now, Summarize("Simulation execution failed", executionFailure));
+        }
+        else
+        {
+            run.Complete(now);
+            logger.LogInformation("Simulation run {RunId} completed with status {Status}.", runId, run.Status);
+        }
+
+        await db.SaveChangesAsync(CancellationToken.None);
+        await PublishSafelyAsync(publisher, ToProgress(run, null));
+    }
+
+    private async Task TryMarkFailedAsync(Guid runId, string summary)
+    {
+        try
+        {
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<CQPulseDbContext>();
+            var run = await db.TestRuns.SingleOrDefaultAsync(x => x.Id == runId);
+            if (run is null || run.Status.IsTerminal()) return;
+            await ApplyPersistedCountsAsync(db, run);
+            run.Fail(DateTimeOffset.UtcNow, summary);
+            await db.SaveChangesAsync();
+            await PublishSafelyAsync(scope.ServiceProvider.GetRequiredService<IRunProgressPublisher>(), ToProgress(run, null));
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Could not mark simulation run {RunId} as failed; startup recovery will handle it.", runId);
+        }
+    }
+
+    /// <summary>Counters always reflect what was actually persisted, including for partial runs.</summary>
+    private static async Task ApplyPersistedCountsAsync(CQPulseDbContext db, TestRun run)
+    {
+        var counts = await db.TestCaseResults.Where(x => x.TestRunId == run.Id)
+            .GroupBy(x => x.Outcome)
+            .Select(g => new { Outcome = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Outcome, x => x.Count);
+        run.PassedCount = counts.GetValueOrDefault(TestOutcome.Passed);
+        run.FailedCount = counts.GetValueOrDefault(TestOutcome.Failed);
+        run.SkippedCount = counts.GetValueOrDefault(TestOutcome.Skipped);
+        run.CompletedTests = run.PassedCount + run.FailedCount + run.SkippedCount;
+    }
+
+    private async Task PublishSafelyAsync(IRunProgressPublisher publisher, RunProgress progress)
+    {
+        try
+        {
+            await publisher.PublishAsync(progress, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            // Live updates are best-effort; clients reconcile through REST.
+            logger.LogWarning(exception, "Progress notification for run {RunId} failed.", progress.RunId);
+        }
+    }
+
+    private static SimulationRequest? TryReadConfiguration(string snapshot)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<SimulationRequest>(snapshot);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static RunProgress ToProgress(TestRun run, string? currentTest) =>
+        new(run.Id, run.Status, run.TotalTests, run.CompletedTests, run.PassedCount, run.FailedCount, run.SkippedCount, currentTest);
+
+    private static string Summarize(string prefix, Exception exception)
+    {
+        var summary = $"{prefix}: {exception.GetBaseException().Message}";
+        return summary.Length <= MaxSummaryLength ? summary : summary[..MaxSummaryLength];
     }
 }

@@ -24,9 +24,14 @@ public sealed class HarnessTests(ApiFixture fixture)
     [Fact]
     public async Task Development_seed_data_is_not_loaded()
     {
-        var projectCount = await fixture.WithDbContextAsync(db => db.Projects.CountAsync());
+        // Other tests in the collection create their own projects, so check for the dev seeder's records specifically.
+        string[] seededProjects = ["Web Portal", "Mobile App", "API Services"];
+        var (seededProjectCount, seededSuiteCount) = await fixture.WithDbContextAsync(async db =>
+            (await db.Projects.CountAsync(x => seededProjects.Contains(x.Name)),
+             await db.TestSuites.CountAsync(x => x.Name == "Login & Authentication")));
 
-        Assert.Equal(0, projectCount);
+        Assert.Equal(0, seededProjectCount);
+        Assert.Equal(0, seededSuiteCount);
     }
 
     [Fact]

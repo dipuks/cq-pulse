@@ -1,4 +1,5 @@
 using CQPulse.Application.Catalog;
+using CQPulse.Application.Common;
 using CQPulse.Domain.Entities;
 using CQPulse.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -23,7 +24,7 @@ internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogServi
 
     public async Task<ProjectDto> CreateProjectAsync(SaveProjectRequest request, CancellationToken cancellationToken)
     {
-        ValidateName(request.Name);
+        Validate(request.Name, request.Description, MaxDescriptionLength);
         var project = new Project { Name = request.Name.Trim(), Description = request.Description?.Trim(), Status = request.Status };
         dbContext.Projects.Add(project);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -32,7 +33,7 @@ internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogServi
 
     public async Task<ProjectDto?> UpdateProjectAsync(Guid projectId, SaveProjectRequest request, CancellationToken cancellationToken)
     {
-        ValidateName(request.Name);
+        Validate(request.Name, request.Description, MaxDescriptionLength);
         var project = await dbContext.Projects.SingleOrDefaultAsync(x => x.Id == projectId, cancellationToken);
         if (project is null) return null;
         project.Name = request.Name.Trim(); project.Description = request.Description?.Trim();
@@ -56,8 +57,9 @@ internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogServi
 
     public async Task<TestSuiteDto?> CreateSuiteAsync(Guid projectId, SaveTestSuiteRequest request, CancellationToken cancellationToken)
     {
-        ValidateName(request.Name);
+        Validate(request.Name, request.Description, MaxDescriptionLength);
         if (!await dbContext.Projects.AnyAsync(x => x.Id == projectId, cancellationToken)) return null;
+        await EnsureUniqueSuiteNameAsync(projectId, request.Name, null, cancellationToken);
         var suite = new TestSuite { ProjectId = projectId, Name = request.Name.Trim(), Description = request.Description?.Trim() };
         dbContext.TestSuites.Add(suite);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -66,9 +68,10 @@ internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogServi
 
     public async Task<TestSuiteDto?> UpdateSuiteAsync(Guid suiteId, SaveTestSuiteRequest request, CancellationToken cancellationToken)
     {
-        ValidateName(request.Name);
+        Validate(request.Name, request.Description, MaxDescriptionLength);
         var suite = await dbContext.TestSuites.Include(x => x.TestCases).SingleOrDefaultAsync(x => x.Id == suiteId, cancellationToken);
         if (suite is null) return null;
+        await EnsureUniqueSuiteNameAsync(suite.ProjectId, request.Name, suite.Id, cancellationToken);
         suite.Name = request.Name.Trim(); suite.Description = request.Description?.Trim(); suite.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
         return new TestSuiteDto(suite.Id, suite.ProjectId, suite.Name, suite.Description, suite.TestCases.Count);
@@ -111,16 +114,34 @@ internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogServi
         return ToDto(testCase);
     }
 
-    private static void ValidateName(string? name)
+    private const int MaxNameLength = 200;
+    private const int MaxDescriptionLength = 2_000;
+    private const int MaxCaseDescriptionLength = 4_000;
+    private const int MaxSimulatedDurationMs = 60_000;
+
+    private async Task EnsureUniqueSuiteNameAsync(Guid projectId, string name, Guid? excludingSuiteId, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 200) throw new ArgumentException("Name is required and must not exceed 200 characters.");
+        var trimmed = name.Trim();
+        if (await dbContext.TestSuites.AnyAsync(x => x.ProjectId == projectId && x.Name == trimmed && x.Id != excludingSuiteId, cancellationToken))
+            throw new ConflictException($"A suite named '{trimmed}' already exists in this project.");
     }
 
-    private static void ValidateCase(SaveTestCaseRequest request)
-    {
-        ValidateName(request.Name);
-        if (request.SimulatedDurationMs is < 0 or > 60_000) throw new ArgumentOutOfRangeException(nameof(request.SimulatedDurationMs));
-    }
+    private static ValidationErrors NameAndDescriptionErrors(string? name, string? description, int maxDescriptionLength) =>
+        new ValidationErrors()
+            .AddIf(string.IsNullOrWhiteSpace(name), "Name", "Name is required.")
+            .AddIf(name?.Trim().Length > MaxNameLength, "Name", $"Name must not exceed {MaxNameLength} characters.")
+            .AddIf(description?.Trim().Length > maxDescriptionLength, "Description", $"Description must not exceed {maxDescriptionLength:N0} characters.");
+
+    private static void Validate(string? name, string? description, int maxDescriptionLength) =>
+        NameAndDescriptionErrors(name, description, maxDescriptionLength).ThrowIfAny();
+
+    private static void ValidateCase(SaveTestCaseRequest request) =>
+        NameAndDescriptionErrors(request.Name, request.Description, MaxCaseDescriptionLength)
+            .AddIf(request.SimulatedDurationMs is < 0 or > MaxSimulatedDurationMs, nameof(request.SimulatedDurationMs),
+                $"Simulated duration must be between 0 and {MaxSimulatedDurationMs:N0} ms.")
+            .AddIf(!Enum.IsDefined(request.Priority), nameof(request.Priority), "Unknown priority.")
+            .AddIf(!Enum.IsDefined(request.SimulatedOutcome), nameof(request.SimulatedOutcome), "Unknown simulated outcome.")
+            .ThrowIfAny();
 
     private static TestCaseDto ToDto(TestCase testCase) => new(testCase.Id, testCase.TestSuiteId, testCase.Name, testCase.Description, testCase.Enabled, testCase.Priority, testCase.SimulatedOutcome, testCase.SimulatedDurationMs);
 }

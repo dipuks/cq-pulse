@@ -1,3 +1,4 @@
+using CQPulse.Application.Simulation;
 using CQPulse.Infrastructure.Identity;
 using CQPulse.Infrastructure.Catalog;
 using CQPulse.Infrastructure.Persistence;
@@ -23,10 +24,15 @@ public static class ServiceCollectionExtensions
         }
 
         services.AddDbContext<CQPulseDbContext>(options => options.UseSqlServer(connectionString));
+        services.AddOptions<SimulatorOptions>()
+            .Bind(configuration.GetSection(SimulatorOptions.SectionName))
+            .Validate(options => !options.Validate().Any(), "Simulator configuration is invalid.")
+            .ValidateOnStart();
         services.AddSingleton<SimulationQueue>();
         services.AddSingleton<RunCancellationRegistry>();
+        services.AddSingleton<IResultBatchWriter, EfResultBatchWriter>();
         services.AddScoped<CQPulse.Application.Catalog.ICatalogService, CatalogService>();
-        services.AddScoped<CQPulse.Application.Simulation.ISimulationService, SimulationService>();
+        services.AddScoped<ISimulationService, SimulationService>();
         services.AddHostedService<ExecutionRecoveryService>();
         services.AddHostedService<SimulationWorker>();
         services.AddIdentityCore<ApplicationUser>(options =>

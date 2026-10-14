@@ -151,3 +151,29 @@ Backend authentication has no automated tests yet (planned for M2/M3 authorizati
 | Dev DB before vs after (read-only `sqlcmd`) | Identical: 26 runs, 24,125 results, 3 projects, 1 user, same run-state checksum |
 
 **Known gap:** the GitHub Actions `backend` job has no SQL Server, so `dotnet test` in CI will now fail at the integration tests until a SQL Server service container and `CQPULSE_TEST_SQL` are added (planned CI work; not changed in M2).
+
+### M3 — Backend correctness and reliability (2026-10-13)
+
+| Plan item | Change | Evidence |
+|---|---|---|
+| 1.1 Error mapping | `ValidationException`/`NotFoundException`/`ConflictException` (Application) and `ApiExceptionHandler`. Unique-index `DbUpdateException` → 409. Suite-name uniqueness checked explicitly. Catalog and simulator validation report every invalid field. | `ErrorMappingTests` (10): 400 with `errors`, 404 for unknown project/run and cross-project suite, 409 for duplicate suite create and rename and for cancelling a finished run, `application/problem+json` |
+| 1.2 Worker failure handling | Any execution or persistence failure → `Failed` with summary. A failed persistence consumer cancels producers (no bounded-channel deadlock). Progress notification failures are logged and ignored. Final counters are computed from persisted rows. Each saved batch atomically increments run counters in the same transaction, so REST polling shows live progress and counters always equal persisted rows. | `Persistence_failure_marks_run_failed_without_deadlocking` (buffer 4, batch 10, writer fails on batch 2 → `Failed`, 10 counted = 10 rows). **Mutation check:** removing the producer cancellation makes this test time out with the run stuck `Running`. `Progress_notification_failures_do_not_fail_the_run`, `Running_run_exposes_live_progress_through_rest` |
+| 1.4 Deterministic seed | `SimulationWorkload`: SplitMix64 per-index streams replace per-process `HashCode.Combine` | Pinned-value unit test; two seeded runs in separate projects produce identical results |
+| 1.5 Configurable limits | `SimulatorOptions` ("Simulator" section, validated on start), `GET /api/simulator/limits` | `Limits_endpoint_reports_configured_limits`; validator unit tests at limit boundaries |
+| 1.6 Accurate preview | Outcomes allocated **exactly** by percentage (largest remainder) through a seeded affine permutation in constant memory. Preview returns those exact counts plus project/suite names, durations, categories, seed, label and estimated duration. | Run of 1,237 tests: final P/F/S equal the preview exactly; 1,237 distinct persisted rows (no duplicates); every failure categorized |
+| 1.9 Typed DTOs | Runs, run detail, results, logs, dashboard and analytics return typed records (same JSON names). The simulator `GetRun` no longer returns the EF entity. Dashboard and analytics return 0 instead of `null` when empty. Trend dates are `yyyy-MM-dd`. | Client builds; 8/8 client tests |
+| 1.11 Readiness | `/health` = liveness, `/health/ready` checks the database; OpenAPI mapped only in Development | `Readiness_check_reports_database_healthy` |
+| Cancellation | The worker reloads the run before finishing, so a user cancellation saved mid-run is kept; partial counters equal persisted rows | `Cancelled_run_stays_cancelled_with_counters_equal_to_persisted_rows` |
+| Recovery | Unchanged behaviour, now covered | `Startup_recovery_fails_interrupted_runs_and_leaves_terminal_runs_untouched` |
+| Consistency | — | `Dashboard_and_analytics_totals_agree_after_runs` |
+| CI | Backend job runs a SQL Server 2022 service container with `CQPULSE_TEST_SQL`; frontend job runs `npm test` | **Not yet verified on GitHub** (workflow runs on `main` pushes and PRs) |
+
+Remaining race (planned M5): a cancellation saved between the worker's final reload and its save can still be overwritten by `Complete()`. The window is now milliseconds, and the `rowversion` concurrency token closes it.
+
+| Command | Result |
+|---|---|
+| `dotnet test CQPulse.slnx --artifacts-path <scratch>` (×4) | ✅ Unit 43/43, Integration 37/37 every run (~23–26 s) |
+| `npx ng build` / `npx ng test --watch=false` | ✅ / ✅ 8/8 |
+| Dev DB baseline after all runs (read-only) | Unchanged (26 runs, 24,125 results, same checksum); 0 `CQPulse_Tests_*` databases left |
+
+Builds used `--artifacts-path` because a running `CQPulse.Api.exe` (started by the user) locks `src/CQPulse.Api/bin`.
