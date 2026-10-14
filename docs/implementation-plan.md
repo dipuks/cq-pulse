@@ -129,3 +129,32 @@ npm start   # src\CQPulse.Client
 # Sign in → Simulator: 1,000 tests → "Live updates connected" → terminal status
 # → appears in Runs (refresh-safe) → Analytics total increases by exactly 1,000
 ```
+
+---
+
+## Status update and Quality Intelligence phases (2026-10-13)
+
+### Confirmed complete (verified in source and tests, not only in reports)
+
+| Milestone | Evidence |
+|---|---|
+| M1 build/styles | Global partials in `src/styles/`; `ng build` passes |
+| M2 test harness | `tests/CQPulse.IntegrationTests/Infrastructure/*`; temporary `CQPulse_Tests_<guid>` databases |
+| M3 backend reliability | `ApiExceptionHandler`, `SimulationWorkload`, `SimulatorOptions`, worker failure paths; `ErrorMappingTests`, `SimulatorExecutionTests` |
+| M4 real-time/client reliability | SignalR JSON enum + CORS credentials; `core/auth.ts` interceptor/guard; `DataState`; `RealtimeTests` |
+| M5 concurrency/hardening | Migration `20261014023133_AddRunConcurrencyAndActiveRunIndex` (**created, not applied to the dev DB**); `ConcurrencyAndHardeningTests` |
+| M6 client restructure | `core/`, `shared/`, `layout/`, `features/*` lazy routes |
+
+### Remaining, in dependency order
+
+| Phase | Scope (from plan Phase 3 items 3.1–3.9, Phase 4, Phase 5 and the Quality Intelligence brief) | Depends on |
+|---|---|---|
+| **Q1 Environment** | User applies the M5 migration to the dev DB; restart the API and the dev server (`npm start` now uses `proxy.conf.json`) | User approval |
+| **M7 Product workflows** | 3.1 dashboard charts and metric semantics; 3.2 project detail with counts and recent runs, list sort/filter/paging; 3.3 suite detail and history; 3.4 test-case filters, enable/disable, history, delete with preserved snapshots; 3.5 simulator runs real suite test cases; 3.7 runs filters (project/date) and **rerun**; 3.8 analytics date/project filters (UTC, exclusive upper bound) with an analytics test matrix; 3.9 theme (done in M6) | — |
+| **M8 Performance** | Opt-in measured runs at 1k and 10k (×3), 50k stretch; `docs/performance.md` | M7 |
+| **Q2 LogTriage integration** | `FailureAnalysis` entity + migration; bounded analysis queue; LTA typed client (CSRF/cookie service login, timeouts, transient retries, circuit breaker); idempotency digest; correlation IDs; integration status endpoint; run-detail triage UI; test double + manual verification against a real LTA started on a scratch SQLite path | M7 (test-case identity), migration approval for the new table |
+| **Q3 Historical intelligence** | Failure signatures, recurrence, flaky candidates (with minimum data), baseline/anomaly detection with explicit thresholds; investigation page | M7, Q2 |
+| **Q4 SmartDog integration** | **Blocked on decisions** (architecture doc §7): git snapshot of SmartDog; structured evaluate endpoint + weighted-objective ranking + API key + tests in SmartDog; CQ Pulse client and decision-support view | Decisions, Q3 |
+| **M9 Release readiness** | CI (verified on GitHub once pushing is approved), README for all three projects, docs, security review, final audit | All |
+
+Design and contracts: [quality-intelligence-architecture.md](quality-intelligence-architecture.md).
