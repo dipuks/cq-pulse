@@ -133,3 +133,21 @@ Not yet verified: visual rendering in a real browser in both themes.
 | Mutation check (login placed back inside the guarded shell) | ✅ Two routing tests failed as expected; file restored |
 
 Backend authentication has no automated tests yet (planned for M2/M3 authorization matrix). The HTTP checks above were run manually.
+
+### M2 — Integration test harness (2026-10-13)
+
+**Added** (`tests/CQPulse.IntegrationTests/Infrastructure/`):
+- `TestDatabase`: creates `CQPulse_Tests_<guid>` on `.\SQLEXPRESS` (or `CQPULSE_TEST_SQL`), applies migrations, and drops it on dispose (`SINGLE_USER WITH ROLLBACK IMMEDIATE`). Every create/drop is guarded by the strict pattern `^CQPulse_Tests_[0-9a-f]{32}$`. Orphans older than 6 hours from killed runs are swept on the next run.
+- `CQPulseApiFactory`: the real API on `WebApplicationFactory<Program>` in the `Testing` environment (no user secrets, no dev seeders) with the test connection string and a random per-fixture JWT key.
+- `ApiFixture` + `ApiCollection`: one database, host and seeded users per collection. It creates an Administrator user and an authenticated user with no role, both with random passwords. Helpers sign in through the real `/api/auth/login` endpoint. Disposal drops the database even when tests fail.
+- `Microsoft.AspNetCore.Mvc.Testing` 10.0.12 added. The empty `UnitTest1` placeholder was removed.
+
+| Check | Result |
+|---|---|
+| `dotnet test CQPulse.slnx` (run 3×) | ✅ Unit 3/3, Integration 16/16 each run (~4–7 s) |
+| Harness tests | API connects to the generated test DB with no pending migrations; dev seed data absent; `/health` anonymous 200; anonymous `/api/projects` 401; admin `/api/auth/me` 200 (matching email) and `/api/projects` 200; non-admin `/api/auth/me` 200 and `/api/projects` **403**; wrong password 401 |
+| Lifecycle tests | Database exists and is migrated after create, gone after dispose; dispose is idempotent; guard rejects `CQPulse`, `master`, malformed and injection-style names |
+| Cleanup on failure (temporary deliberately failing test, then removed) | 1 failed / 16 passed; **0** `CQPulse_Tests_*` databases remaining |
+| Dev DB before vs after (read-only `sqlcmd`) | Identical: 26 runs, 24,125 results, 3 projects, 1 user, same run-state checksum |
+
+**Known gap:** the GitHub Actions `backend` job has no SQL Server, so `dotnet test` in CI will now fail at the integration tests until a SQL Server service container and `CQPULSE_TEST_SQL` are added (planned CI work; not changed in M2).
