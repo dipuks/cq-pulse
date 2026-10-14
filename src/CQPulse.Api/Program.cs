@@ -19,7 +19,9 @@ builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddCQPulseInfrastructure(builder.Configuration);
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<CQPulse.Infrastructure.Persistence.CQPulseDbContext>("database", tags: ["ready"]);
-builder.Services.AddSignalR();
+// SignalR has its own JSON settings; match the REST API so statuses arrive as names, not numbers.
+builder.Services.AddSignalR().AddJsonProtocol(options =>
+    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddScoped<IRunProgressPublisher, SignalRRunProgressPublisher>();
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
 if (string.IsNullOrWhiteSpace(jwtOptions.SigningKey) || jwtOptions.SigningKey.Length < 32)
@@ -57,7 +59,9 @@ builder.Services.AddCors(options => options.AddPolicy("client", policy =>
     policy.WithOrigins(builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
             ?? ["http://localhost:4200"])
         .AllowAnyHeader()
-        .AllowAnyMethod()));
+        .AllowAnyMethod()
+        // The SignalR browser client sends credentials on negotiate by default; origins are explicit, so this is allowed.
+        .AllowCredentials()));
 
 var app = builder.Build();
 
