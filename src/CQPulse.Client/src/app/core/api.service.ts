@@ -1,0 +1,64 @@
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { Injectable, inject } from '@angular/core';
+import { API_BASE_URL } from './api-config';
+import {
+  AnalyticsSummary, DashboardSummary, FailureCount, PageResponse, Project, RunDetail, RunLog, RunResult, RunSummary,
+  SaveProject, SaveSuite, SaveTestCase, SimulationPreview, SimulationRequest, SimulatorLimits, Suite, TestCase, TestOutcome, TrendPoint
+} from './models';
+
+export type QueryParams = Record<string, string | number | boolean | null | undefined>;
+
+/** Drops empty values so optional filters are simply omitted from the query string. */
+export function toParams(query: QueryParams = {}): HttpParams {
+  let params = new HttpParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== null && value !== undefined && value !== '') params = params.set(key, String(value));
+  }
+  return params;
+}
+
+@Injectable({ providedIn: 'root' })
+export class ApiService {
+  private readonly http = inject(HttpClient);
+  private readonly api = `${inject(API_BASE_URL)}/api`;
+
+  projects(query: QueryParams = {}) { return this.http.get<PageResponse<Project>>(`${this.api}/projects`, { params: toParams(query) }); }
+  project(id: string) { return this.http.get<Project>(`${this.api}/projects/${id}`); }
+  saveProject(body: SaveProject, id?: string) {
+    return id ? this.http.put<Project>(`${this.api}/projects/${id}`, body) : this.http.post<Project>(`${this.api}/projects`, body);
+  }
+
+  suites(projectId: string, query: QueryParams = {}) {
+    return this.http.get<PageResponse<Suite>>(`${this.api}/projects/${projectId}/suites`, { params: toParams(query) });
+  }
+  suite(id: string) { return this.http.get<Suite>(`${this.api}/suites/${id}`); }
+  saveSuite(projectId: string, body: SaveSuite, id?: string) {
+    return id ? this.http.put<Suite>(`${this.api}/suites/${id}`, body) : this.http.post<Suite>(`${this.api}/projects/${projectId}/suites`, body);
+  }
+
+  cases(suiteId: string, query: QueryParams = {}) {
+    return this.http.get<PageResponse<TestCase>>(`${this.api}/suites/${suiteId}/cases`, { params: toParams(query) });
+  }
+  testCase(id: string) { return this.http.get<TestCase>(`${this.api}/test-cases/${id}`); }
+  saveCase(suiteId: string, body: SaveTestCase, id?: string) {
+    return id ? this.http.put<TestCase>(`${this.api}/test-cases/${id}`, body) : this.http.post<TestCase>(`${this.api}/suites/${suiteId}/cases`, body);
+  }
+
+  dashboard() { return this.http.get<DashboardSummary>(`${this.api}/dashboard/summary`); }
+
+  runs(query: QueryParams = {}) { return this.http.get<PageResponse<RunSummary>>(`${this.api}/runs`, { params: toParams(query) }); }
+  run(id: string) { return this.http.get<RunDetail>(`${this.api}/runs/${id}`); }
+  results(id: string, query: { outcome?: TestOutcome | ''; page?: number; pageSize?: number } = {}) {
+    return this.http.get<PageResponse<RunResult>>(`${this.api}/runs/${id}/results`, { params: toParams(query) });
+  }
+  logs(id: string, query: QueryParams = {}) { return this.http.get<PageResponse<RunLog>>(`${this.api}/runs/${id}/logs`, { params: toParams(query) }); }
+
+  simulatorLimits() { return this.http.get<SimulatorLimits>(`${this.api}/simulator/limits`); }
+  preview(body: SimulationRequest) { return this.http.post<SimulationPreview>(`${this.api}/simulator/preview`, body); }
+  start(body: SimulationRequest) { return this.http.post<{ runId: string }>(`${this.api}/simulator/runs`, body); }
+  cancel(id: string) { return this.http.post<void>(`${this.api}/simulator/runs/${id}/cancel`, {}); }
+
+  analyticsSummary(query: QueryParams = {}) { return this.http.get<AnalyticsSummary>(`${this.api}/analytics/summary`, { params: toParams(query) }); }
+  trends(query: QueryParams = {}) { return this.http.get<TrendPoint[]>(`${this.api}/analytics/execution-trends`, { params: toParams(query) }); }
+  failures(query: QueryParams = {}) { return this.http.get<FailureCount[]>(`${this.api}/analytics/failure-breakdown`, { params: toParams(query) }); }
+}

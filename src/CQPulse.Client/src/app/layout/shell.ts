@@ -1,6 +1,7 @@
-import { Component, signal } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { AuthService, ThemeService } from './core';
+import { AuthService } from '../core/auth';
+import { ThemeService } from '../core/theme.service';
 
 /** Authenticated application layout: sidebar navigation, top bar, and the routed page. */
 @Component({
@@ -9,8 +10,7 @@ import { AuthService, ThemeService } from './core';
   templateUrl: './shell.html'
 })
 export class Shell {
-  protected readonly dark = signal(false);
-  constructor(private readonly theme: ThemeService, private readonly auth: AuthService) { this.dark.set(this.theme.isDark()); }
-  protected toggleTheme(): void { this.dark.set(this.theme.set(!this.dark())); }
+  protected readonly theme = inject(ThemeService);
+  private readonly auth = inject(AuthService);
   protected signOut(): void { this.auth.signOut(); }
 }

@@ -1,0 +1,115 @@
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">WORKLOAD SIMULATOR</p>
+    <h1>Configure a run</h1>
+    <p class="intro">Simulated execution: the server generates and runs the workload, then persists every result.</p>
+  </div>
+</section>
+@if (loadError()) { <p class="error" role="alert">{{ loadError() }}</p> }
+
+<section class="split">
+  <form class="panel form" (ngSubmit)="requestPreview()" (input)="invalidatePreview()" (change)="invalidatePreview()">
+    <label>Target project
+      <select [(ngModel)]="model.projectId" (ngModelChange)="loadSuites()" name="project" required>
+        <option value="">Choose project</option>
+        @for (p of projects(); track p.id) { <option [value]="p.id">{{ p.name }}</option> }
+      </select>
+    </label>
+    <label>Test suite (optional)
+      <select [(ngModel)]="model.testSuiteId" name="suite">
+        <option [ngValue]="null">All suites</option>
+        @for (s of suites(); track s.id) { <option [ngValue]="s.id">{{ s.name }}</option> }
+      </select>
+    </label>
+    <div class="two-col">
+      <label>Test count<input type="number" [(ngModel)]="model.testCount" name="count" min="1" [max]="limits()?.maxTestCount ?? null"></label>
+      <label>Concurrency<input type="number" [(ngModel)]="model.maxConcurrency" name="concurrency" min="1" [max]="limits()?.maxConcurrency ?? null"></label>
+    </div>
+    <div class="three-col">
+      <label>Pass %<input type="number" [(ngModel)]="model.passPercentage" name="pass" min="0" max="100"></label>
+      <label>Failure %<input type="number" [(ngModel)]="model.failurePercentage" name="failure" min="0" max="100"></label>
+      <label>Skipped %<input type="number" [(ngModel)]="model.skippedPercentage" name="skipped" min="0" max="100"></label>
+    </div>
+    <div class="two-col">
+      <label>Min duration ms<input type="number" [(ngModel)]="model.minimumDurationMs" name="min" min="0"></label>
+      <label>Max duration ms<input type="number" [(ngModel)]="model.maximumDurationMs" name="max" min="0" [max]="limits()?.maxDurationMs ?? null"></label>
+    </div>
+    <fieldset class="form">
+      <legend class="eyebrow">FAILURE CATEGORIES</legend>
+      @for (c of categories; track c) {
+        <label class="check">
+          <input type="checkbox" [checked]="model.failureCategories.includes(c)" (change)="toggleCategory(c, $any($event.target).checked)"> {{ c }}
+        </label>
+      }
+    </fieldset>
+    <div class="two-col">
+      <label>Random seed (optional)<input type="number" [(ngModel)]="model.randomSeed" name="seed" placeholder="Random each run"></label>
+      <label>Run label<input [(ngModel)]="model.runLabel" name="label" maxlength="200"></label>
+    </div>
+    @for (e of errors(); track e) { <p class="field-error" role="alert">{{ e }}</p> }
+    <button class="primary" type="submit" [disabled]="previewing()">{{ previewing() ? 'Checking…' : 'Preview run' }}</button>
+    @if (limits(); as l) {
+      <p class="empty">Limits: up to {{ l.maxTestCount | number }} tests, concurrency {{ l.maxConcurrency }}, {{ l.maxDurationMs | number }} ms per test.</p>
+    }
+  </form>
+
+  <article class="panel">
+    <p class="eyebrow">REQUEST PREVIEW</p>
+    <h2>{{ preview() ? 'Ready to queue' : 'Awaiting configuration' }}</h2>
+    @if (preview(); as p) {
+      <div class="preview">
+        <span>Target <b>{{ p.projectName }}{{ p.testSuiteName ? ' · ' + p.testSuiteName : ' · all suites' }}</b></span>
+        <span>Tests <b>{{ p.testCount | number }}</b></span>
+        <span>Passed (exact) <b>{{ p.expectedPassed | number }}</b></span>
+        <span>Failed (exact) <b>{{ p.expectedFailed | number }}</b></span>
+        <span>Skipped (exact) <b>{{ p.expectedSkipped | number }}</b></span>
+        <span>Durations <b>{{ p.minimumDurationMs | number }}–{{ p.maximumDurationMs | number }} ms</b></span>
+        <span>Concurrency <b>{{ p.maxConcurrency }}</b></span>
+        <span>Seed <b>{{ p.randomSeed ?? 'random' }}</b></span>
+        <span>Estimated time <b>~{{ p.estimatedDurationSeconds | number: '1.0-1' }} s</b></span>
+        <small>{{ p.resourceWarning }}</small>
+      </div>
+      <button class="primary wide" type="button" (click)="start()" [disabled]="starting() || runActive()">
+        {{ starting() ? 'Queueing…' : runActive() ? 'A run is in progress' : 'Queue simulation' }}
+      </button>
+    } @else {
+      <p class="empty">Preview the configuration to see exactly what will be queued. Editing the form clears the preview.</p>
+    }
+    @if (actionError()) { <p class="error" role="alert">{{ actionError() }}</p> }
+
+    @if (activeRun(); as run) {
+      <div class="live-run" aria-live="polite">
+        <p class="eyebrow">{{ isTerminal(run.status) ? 'FINAL SUMMARY' : 'LIVE EXECUTION' }}</p>
+        <h2><span class="status" [attr.data-status]="run.status">{{ run.status }}</span> {{ run.runLabel }}</h2>
+        <p class="live-status" [attr.data-state]="liveState()">
+          @switch (liveState()) {
+            @case ('connected') { Live updates connected · REST reconciles every 5 s }
+            @case ('connecting') { Connecting live updates… REST polling active }
+            @case ('reconnecting') { Live connection reconnecting · REST polling every 1 s }
+            @case ('unavailable') { Live updates unavailable{{ liveDetail() ? ': ' + liveDetail() : '' }} · REST polling every 1 s }
+            @default { {{ isTerminal(run.status) ? 'Run finished · showing persisted totals' : 'REST polling active' }} }
+          }
+        </p>
+        <div class="progress" role="progressbar" [attr.aria-valuenow]="run.completedTests" aria-valuemin="0" [attr.aria-valuemax]="run.totalTests">
+          <span [style.width.%]="run.totalTests ? run.completedTests / run.totalTests * 100 : 0"></span>
+        </div>
+        <div class="run-stats">
+          <div><small>Processed</small><b>{{ run.completedTests | number }} / {{ run.totalTests | number }}</b></div>
+          <div><small>Passed</small><b>{{ run.passedCount | number }}</b></div>
+          <div><small>Failed</small><b>{{ run.failedCount | number }}</b></div>
+          <div><small>Skipped</small><b>{{ run.skippedCount | number }}</b></div>
+          <div><small>Elapsed</small><b>{{ elapsedSeconds() | number: '1.1-1' }} s</b></div>
+          <div><small>Throughput</small><b>{{ throughput() | number: '1.0-0' }} tests/s</b></div>
+        </div>
+        @if (run.errorSummary) { <p class="error" role="alert">{{ run.errorSummary }}</p> }
+        @if (run.cancellationReason) { <p class="empty">{{ run.cancellationReason }}</p> }
+        @if (!isTerminal(run.status)) {
+          <button type="button" class="secondary danger" (click)="cancel()">Cancel run</button>
+        } @else {
+          <p class="empty">Completed {{ run.completedAtUtc | date: 'medium' }}.</p>
+          <a [routerLink]="['/runs', run.id]">Open run detail →</a>
+        }
+      </div>
+    }
+  </article>
+</section>

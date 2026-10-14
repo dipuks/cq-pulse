@@ -177,3 +177,31 @@ Remaining race (planned M5): a cancellation saved between the worker's final rel
 | Dev DB baseline after all runs (read-only) | Unchanged (26 runs, 24,125 results, same checksum); 0 `CQPulse_Tests_*` databases left |
 
 Builds used `--artifacts-path` because a running `CQPulse.Api.exe` (started by the user) locks `src/CQPulse.Api/bin`.
+
+### M4 — Real-time and client reliability, and M6 — client restructure (2026-10-13)
+
+**Server (M4 2.1):** SignalR now uses `JsonStringEnumConverter` (statuses arrive as names), and the CORS policy adds `AllowCredentials()` (origins remain explicit).
+
+| Test (`RealtimeTests`) | Result |
+|---|---|
+| Admin joins a run group and receives `RunProgressUpdated` with **string** statuses; final message 300/300 | ✅ |
+| Anonymous hub connection → 401; non-admin → 403 | ✅ / ✅ |
+| Credentialed CORS preflight on `/hubs/runs/negotiate` from `http://localhost:4200` → `Access-Control-Allow-Credentials: true`; unknown origin not allowed | ✅ / ✅ |
+| **Mutation check:** removing the enum converter and `AllowCredentials()` | The string-status and CORS tests fail as expected; code restored |
+
+**Client (M4 2.2–2.5 and M6 3.0):**
+- The 26 KB single-file `pages.ts` and `core.ts` were split into `core/` (models, API service, auth, errors, theme), `shared/` (`loadable`, `DataState`, `Pager`), `layout/shell` and `features/*` (one folder per route). Routes are lazy-loaded: the initial bundle went from 431 kB to 301 kB, and the SignalR client now ships only with the simulator.
+- **Environment config (2.3):** relative `/api` and `/hubs` through `API_BASE_URL` (default same origin). `npm start` uses `proxy.conf.json`, so no CORS is involved in development. Verified through a temporary dev server on :4300 against the running API: `/api/projects` 401, `/hubs/runs/negotiate` 401, `/health` 200 (proxied); a deep link `/runs/abc` serves the app.
+- **Session handling (2.4):** the interceptor turns a 401 on any call except sign-in into `/login?reason=expired&returnUrl=…` (open-redirect safe). The guard checks the JWT `exp`. A 403 keeps the session.
+- **Failure states (2.5):** every list and detail page shows loading → error with Retry → truly empty. Empty states only appear after a successful empty response. Server Problem Details messages (validation, 404, 409) are shown on forms.
+- **Simulator (2.1/2.2/2.6):** `RunLiveConnection` joins the run group, reconciles through REST after connect and every reconnect, reports the real connection state and error text, and stops when the run is terminal. REST polling runs every 1 s, or every 5 s while live updates are healthy. Out-of-order live events never move progress backwards. Preview is cleared on any edit, and queueing requires a current preview. Queue is disabled while a run is active (duplicate-submission guard). Live panel shows processed, P/F/S, elapsed, throughput and final summary. Failure category checkboxes and optional seed added. Client validation mirrors the server, using `/api/simulator/limits`.
+- Run detail: configuration, seed, timestamps and duration; paginated results with outcome filter; working **Cancel** for active runs. Runs list: server-side pagination. Theme state is shared by the top bar and Settings.
+
+| Command | Result |
+|---|---|
+| `dotnet test CQPulse.slnx --artifacts-path <scratch>` | ✅ Unit 43/43, Integration 42/42 |
+| `npx ng build` | ✅ initial 301 kB, all feature routes lazy |
+| `npx ng test --watch=false` | ✅ 30/30 (auth guard, interceptor 401/403, return-URL safety, Problem Details messages, analytics error-vs-empty **regression test**, simulator validation and preview invalidation) |
+| Dev DB baseline (read-only) | Unchanged; 0 test databases left |
+
+**Not verified in a real browser:** live SignalR in the browser. The server path is covered by integration tests; the browser client could not be exercised in this session.

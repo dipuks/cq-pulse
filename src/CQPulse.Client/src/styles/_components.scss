@@ -161,3 +161,43 @@
   .table-row { grid-template-columns: 1.5fr 1fr; }
   .table-row > :nth-child(3), .table-row > :nth-child(4) { display: none; }
 }
+
+// Error with retry action (DataState).
+.state-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; }
+.state-error button {
+  padding: 6px 12px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+// Secondary action button (filters, pagination, cancel/rerun).
+.secondary {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.secondary.danger { color: var(--danger-text); border-color: var(--danger-text); }
+
+.pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 14px; color: var(--muted); font-size: 13px; }
+
+.field-error { color: var(--danger-text); font-size: 12px; font-weight: 600; }
+
+.live-status { font-size: 12px; color: var(--muted); }
+.live-status[data-state='connected'] { color: var(--success-text); }
+.live-status[data-state='reconnecting'], .live-status[data-state='unavailable'] { color: var(--warning-text); }
+
+.run-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin: 14px 0; }
+.run-stats div { display: grid; gap: 2px; }
+.run-stats small { color: var(--muted); font-size: 11px; }
+.run-stats b { font-size: 18px; }
+
+.config { margin: 0; padding: 12px; overflow-x: auto; border-radius: 8px; background: var(--bg); font-size: 12px; }
+.definition-list { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 0; font-size: 13px; }
+.definition-list dt { color: var(--muted); }
+.definition-list dd { margin: 0; }

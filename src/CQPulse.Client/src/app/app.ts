@@ -1,6 +1,6 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
-import { ThemeService } from './core';
+import { ThemeService } from './core/theme.service';
 
 /** Root component. Layout is chosen by the route: Shell for authenticated pages, bare for /login. */
 @Component({
@@ -9,6 +9,6 @@ import { ThemeService } from './core';
   templateUrl: './app.html'
 })
 export class App implements OnInit {
-  constructor(private readonly theme: ThemeService) {}
+  private readonly theme = inject(ThemeService);
   ngOnInit(): void { this.theme.initialize(); }
 }

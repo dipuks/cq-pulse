@@ -1,0 +1,5 @@
+{
+  "/api": { "target": "https://localhost:7256", "secure": false, "changeOrigin": true },
+  "/hubs": { "target": "https://localhost:7256", "secure": false, "changeOrigin": true, "ws": true },
+  "/health": { "target": "https://localhost:7256", "secure": false, "changeOrigin": true }
+}
