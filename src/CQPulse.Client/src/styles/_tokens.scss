@@ -1,0 +1,54 @@
+// Design tokens. Light is the default; dark applies via [data-theme='dark'] set by ThemeService.
+:root {
+  color-scheme: light;
+  --bg: #f5f8fc;
+  --surface: #fff;
+  --text: #172b4d;
+  --muted: #64748b;
+  --border: #dce5f0;
+  --primary: #2878f0;
+  --primary-soft: #e9f3ff;
+  --violet: #8b5cf6;
+  --violet-soft: #eee9ff;
+  --teal: #0d9488;
+  --warning: #d97706;
+  --success-bg: #d1fae5;
+  --success-text: #08745e;
+  --danger-bg: #fee2e2;
+  --danger-text: #b42338;
+  --warning-bg: #fef3c7;
+  --warning-text: #92400e;
+  --neutral-bg: #e2e8f0;
+  --neutral-text: #334155;
+  --info-bg: #dbeafe;
+  --info-text: #1d4ed8;
+  --shadow: 0 12px 32px rgba(35, 71, 125, .08);
+  --radius: 14px;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #091528;
+  --surface: #10213a;
+  --text: #edf5ff;
+  --muted: #a7b8cf;
+  --border: #263b59;
+  --primary: #58a6ff;
+  --primary-soft: rgba(88, 166, 255, .14);
+  --violet: #ac91ff;
+  --violet-soft: rgba(172, 145, 255, .14);
+  --teal: #36cfba;
+  --warning: #f0ad4e;
+  --success-bg: rgba(54, 207, 186, .16);
+  --success-text: #5eead4;
+  --danger-bg: rgba(248, 113, 113, .16);
+  --danger-text: #fca5a5;
+  --warning-bg: rgba(240, 173, 78, .16);
+  --warning-text: #fcd34d;
+  --neutral-bg: rgba(148, 163, 184, .16);
+  --neutral-text: #cbd5e1;
+  --info-bg: rgba(88, 166, 255, .16);
+  --info-text: #93c5fd;
+  --shadow: 0 12px 32px rgba(0, 0, 0, .24);
+}

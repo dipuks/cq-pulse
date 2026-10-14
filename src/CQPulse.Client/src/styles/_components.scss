@@ -1,0 +1,163 @@
+// Reusable surfaces: panels, metric cards, tables, forms, status badges, simulator and log widgets.
+.panel,
+.metrics article {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.panel { padding: 22px; }
+.panel + .panel { margin-top: 18px; }
+
+.panel-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+// Metric cards: label, value, caption stacked.
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 18px; }
+.metrics article { display: grid; gap: 6px; padding: 18px; }
+.metrics small, .metrics i { color: var(--muted); font-size: 12px; font-style: normal; }
+.metrics strong { font-size: 25px; }
+
+// Status badges. Templates set data-status to the API status/outcome value.
+.status {
+  justify-self: start;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--neutral-bg);
+  color: var(--neutral-text);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.status[data-status='Passed'], .status[data-status='Active'] { background: var(--success-bg); color: var(--success-text); }
+.status[data-status='Failed'] { background: var(--danger-bg); color: var(--danger-text); }
+.status[data-status='CompletedWithFailures'], .status[data-status='Skipped'] { background: var(--warning-bg); color: var(--warning-text); }
+.status[data-status='Running'], .status[data-status='Queued'] { background: var(--info-bg); color: var(--info-text); }
+
+// Compact list rows (dashboard panels).
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.row:last-of-type { border-bottom: 0; }
+.row > :first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+// Tabular rows.
+.table-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr 1.1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.table-row strong { display: grid; gap: 4px; }
+.table-row small { color: var(--muted); font-weight: 400; }
+.table-row.heading { color: var(--muted); font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.link-row { color: inherit; text-decoration: none; }
+.link-row:hover { background: var(--bg); text-decoration: none; }
+
+// Forms.
+.form { display: grid; gap: 15px; max-width: 720px; }
+.form label,
+.login-card label,
+.search-input {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.form input, .form textarea, .form select,
+.filters input, .filters select,
+.search-input input,
+.login-card input,
+.panel-title select {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+}
+.form textarea { min-height: 90px; resize: vertical; }
+.form .check { display: flex; align-items: center; gap: 8px; }
+.search-input { margin-bottom: 14px; }
+
+.filters { display: flex; gap: 10px; margin-bottom: 15px; }
+.filters input { flex: 1; }
+.filters button,
+.live-run button {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+// Login.
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at 20% 20%, var(--primary-soft), transparent 36%), var(--bg);
+}
+.login-card {
+  width: min(100%, 430px);
+  display: grid;
+  gap: 16px;
+  padding: 34px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+// Simulator preview and live run.
+.preview { display: grid; gap: 13px; margin: 20px 0; }
+.preview span { display: flex; justify-content: space-between; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.live-run { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+.progress { height: 8px; margin: 12px 0; overflow: hidden; border-radius: 10px; background: var(--border); }
+.progress span { display: block; height: 100%; background: var(--teal); transition: width .3s; }
+
+// Analytics failure bars.
+.failure-row {
+  display: grid;
+  grid-template-columns: 120px 1fr 48px;
+  gap: 11px;
+  align-items: center;
+  margin: 14px 0;
+  font-size: 12px;
+}
+.failure-row div { height: 8px; overflow: hidden; border-radius: 99px; background: var(--border); }
+.failure-row i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, #e45b70, #f1ad32); }
+.failure-row b { text-align: right; }
+
+// Execution logs.
+.log { padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.log time { display: inline-block; width: 190px; color: var(--muted); }
+.log b { margin-right: 8px; }
+
+@media (max-width: 850px) {
+  .metrics { grid-template-columns: 1fr 1fr; }
+  .table-row { grid-template-columns: 1.5fr 1fr 1fr; }
+  .table-row > :last-child { display: none; }
+}
+
+@media (max-width: 550px) {
+  .metrics { grid-template-columns: 1fr; }
+  .filters { flex-direction: column; }
+  .table-row { grid-template-columns: 1.5fr 1fr; }
+  .table-row > :nth-child(3), .table-row > :nth-child(4) { display: none; }
+}

@@ -1,0 +1,61 @@
+// Element defaults, typography and shared controls.
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button, input, select, textarea { font: inherit; }
+
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+h1 { font-size: 42px; line-height: 1.1; margin: 0; }
+h1 em { font-style: normal; color: var(--violet); }
+h2 { font-size: 18px; margin: 0; }
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+
+.intro { color: var(--muted); max-width: 600px; line-height: 1.6; }
+.empty { color: var(--muted); }
+
+.primary {
+  display: inline-block;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(120deg, var(--primary), var(--violet));
+  color: #fff;
+  font-weight: 750;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(40, 120, 240, .22);
+}
+a.primary:hover { text-decoration: none; filter: brightness(1.05); }
+
+.wide { width: 100%; }
+
+button:disabled { opacity: .55; cursor: not-allowed; }
+
+.error {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+@media (max-width: 550px) {
+  h1 { font-size: 34px; }
+}

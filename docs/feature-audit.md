@@ -1,70 +1,105 @@
 # CQ Pulse Feature Audit
 
-Audit date: 2026-10-11. Evidence is limited to the current repository and local SQL Server verification; no database was reset.
+Audit date: 2026-10-13. Branch `main` at `563f1c9` ("Implement routed CQ Pulse frontend"), with two uncommitted client changes (`src/app/pages.ts`, `src/styles.scss`).
 
-| Feature | Status | Evidence | Gaps | Recommended next action |
+This audit was read-only: no application source was edited, no migration was applied, no data was changed, and no service was started or restarted. Database figures come from `SELECT`-only queries against the local development database. Secrets are referred to by key name only.
+
+## Status legend
+
+| Status | Meaning |
+|---|---|
+| Verified working | Exercised during this audit and behaved correctly |
+| Implemented but not verified | Code exists and looks complete, but was not exercised end to end |
+| Partially implemented | Some of the expected behavior exists; there are known gaps |
+| Missing | Not present |
+| Broken | Present but fails, or provably misbehaves |
+
+## Runtime state at audit time
+
+| Item | Finding |
+|---|---|
+| API process | **Not running.** Nothing listens on 7256/5191, and the Angular dev server (4200) is not running either. The only `dotnet` processes are VS Code build hosts and MSBuild worker nodes, which hold no locks on the API output. |
+| API build output | `src/CQPulse.Api/bin/Debug/net10.0/CQPulse.Api.dll`, built 2026-10-11 22:29, contains `AnalyticsController`. |
+| User secrets (keys only) | `ConnectionStrings:CQPulse`, `Jwt:SigningKey`, `DevelopmentAdmin:Email`, `DevelopmentAdmin:Password` are all configured. |
+| Database | Local SQL Express, integrated authentication, migration `20261011132614_InitialCreate` applied. `dotnet ef migrations has-pending-model-changes` reports no drift. |
+
+### Database contents (verified)
+
+The figures reported earlier (26 runs and 24,125 results: 19,281 passed, 3,699 failed, 1,145 skipped, 3,699 categorized failures) **match exactly**.
+
+| Table | Rows |
+|---|---:|
+| TestRuns | 26 (4 Passed, 22 CompletedWithFailures, 0 active) |
+| TestCaseResults | 24,125 |
+| ExecutionLogs | **0** |
+| Projects / TestSuites / TestCases | 3 / 1 / 2 |
+| AspNetUsers | 1 |
+
+For every run, `TotalTests = CompletedTests = Passed + Failed + Skipped = persisted result rows`. Results span 2026-10-11 (23,925) and 2026-10-12 (200).
+
+## Feature status
+
+| Feature | Status | Evidence | Known defects / gaps | Missing tests |
 |---|---|---|---|---|
-| Projects, suites, and cases | Partially Implemented | `CatalogService`, catalog controllers; routed Angular project/suite/case pages in `src/CQPulse.Client/src/app/pages.ts` | API has create/read/update and page/search in places, but no delete/archive, consistent sorting/filtering, project-level aggregate counts, or list pagination controls | Add archive semantics, sortable/filterable query contracts, project aggregates, and list pagination controls |
-| Configurable simulator | Partially Implemented | `SimulationRequest`, `SimulationService.Validate`, dashboard outcome inputs; failure categories and seed accepted | Suite workload resolution, generated-case storage, presets, preview UI, logging detail are absent | Add configuration presets/preview and workload source selection |
-| 1,000/10,000 workloads | Partially Implemented | Verified after batched persistence: 1,000 persisted in 654 ms; 10,000 persisted in 4,235 ms, zero simulated duration, concurrency 128 | Measurements include no real delay or memory/DB write telemetry; 50,000 unmeasured | Add repeatable performance tests with memory/write metrics and a 50,000 scenario |
-| Execution architecture | Partially Implemented | Bounded queue (100), `Parallel.ForEachAsync`, cancellation registry, bounded 2,000-item result channel, short-lived 500-result EF save batches, and startup `ExecutionRecoveryService` that marks queued/running runs failed after restart | No durable queue, retry policy, or multi-run worker scaling | Add retry/failure policy and durable job infrastructure when needed |
-| Database and migrations | Partially Implemented | `CQPulseDbContext`, migration `20261011132614_InitialCreate`, indexes for runs/results/logs; result snapshot and nullable case foreign key | No migration test, archive semantics, or measured query plan review | Add relational integration coverage and data-retention policy |
-| SignalR | Partially Implemented | Administrator authorization on `RunsHub`; JWT query-token handling in `Program`; dedicated Simulator page `HubConnection` joins the run group, handles `RunProgressUpdated`, reconnects and re-joins, while REST polls the authoritative run state | No resource-level project membership model or SignalR integration tests; live connectivity was not browser-verified in this increment | Add project membership and integration/reconnect tests |
-| Dashboard | Partially Implemented | `DashboardController.GetSummary`, `/api/runs`, `/api/projects`, and `DashboardPage` | Dashboard presents persisted summary/recent run/project data, but does not yet render the persisted trend and failure-breakdown projections | Bind trends and failure categories to dashboard visualizations |
-| Analytics | Partially Implemented | `AnalyticsController` provides persisted-result summary, date/project-filtered daily trends, and failure-category breakdown; consistent pass/failure-rate and average-duration calculations | Dashboard charts are not yet bound to these responses; no throughput/project comparison tests | Bind dashboard panels and add aggregate/date-filter tests |
-| Run details | Partially Implemented | `RunsController` supports server-side run search/status/date filters, sorting, pagination, run-detail projection, and paged results/logs; `RunsPage`/`RunDetailPage` display persisted runs, outcomes, errors, and logs | UI does not yet expose date/project/sort filters or pagination controls; worker logs are normally empty; no rerun endpoint | Add remaining filters/pagination, persisted execution logs, and rerun support |
-| Authentication and authorization | Partially Implemented | Identity/JWT login, `AddAuthorization`, administrator authorization on catalog/simulator/run/dashboard controllers and `RunsHub`; Angular REST interceptor and SignalR access-token factory | The current model has no project membership relation: administrators intentionally have global access; no non-admin project role or authorization test suite exists | Add project membership before introducing non-administrator users and automated 401/403 tests |
-| Theme | Fully Implemented | `ThemeService`, CSS variables, local-storage preference, dark-mode control in application shell and Settings | System preference is initial-only | Add theme service tests |
-| Routing, responsiveness, accessibility | Partially Implemented | `provideRouter(routes)`, `authGuard`, application shell, router-link sidebar, default/unknown redirects, all requested protected routes, responsive SCSS | Components are currently eagerly loaded; no automated accessibility coverage; suite/case navigation is contextual rather than a global menu item | Add lazy route boundaries and accessibility tests |
-| Automated tests | Broken | `TestRunTests` has 3 lifecycle tests; integration project only template test | No simulator, API, Angular, SignalR, cancellation, or performance tests | Add relational integration and performance test suite first |
-| Documentation, CI, deployment | Partially Implemented | `README.md`, architecture plan, GitHub Actions build/test workflow | No API/simulator docs, screenshots, Docker/deployment readiness | Add operations/API/performance documentation |
+| **Frontend build & styling** | Implemented but not verified (visually) — **fixed in M1** | **Before M1:** `npm run build` and `ng test` both failed (`@use rules must be written before any other rules`). Root cause of the unstyled pages: the design system lived in `app.scss`, scoped to `App` by emulated encapsulation, so routed pages never received its styles. **M1:** the design system is now global partials (`src/styles/_tokens.scss`, `_base.scss`, `_layout.scss`, `_components.scss`), `@use`d at the top of `styles.scss`. `app.scss` and `App.styleUrl` were removed (no double emission). Dead pre-routing CSS dropped. `.row`/`.three-col` styled. The metric-card grid no longer reserves an unused icon column. Status badges are coloured per status through `data-status`. Hard-coded light colours were replaced with theme tokens, and focus-visible outlines were added. Evidence: production build passes (global CSS 9.50 kB, no budget warnings); `ng test` 2/2 pass; every class used in `pages.ts`/`app.html` has a rule in the compiled CSS (only `active` is runtime-applied). | Visual check in a browser (light and dark) is still pending: no browser was available in this session. `/login` still renders inside the shell (planned for 2.6). | Style smoke test per route |
+| Routing & shell | Partially implemented | `app.routes.ts` defines all routes behind `authGuard`, with a not-found redirect. | `/login` renders **inside** the shell: the sidebar, nav and "Sign out" are visible before sign-in (`app.html` has no layout split). All components are eager-loaded from one 26 KB file (`pages.ts`). Suite and case screens are reachable only through Projects → Suites. | Route/guard tests |
+| Authentication (API) | Implemented but not verified | Identity + JWT (`TokenService`), 32+ character key enforced at startup, role claims, `[Authorize(Roles="Administrator")]` on every data controller and on `RunsHub`. The previous audit reported anonymous 401s. | `CheckPasswordAsync` skips lockout, and there is no rate limiting on `/api/auth/login`. `RequestedByUserId` stores the email (`Identity.Name`), not the user id. | 401/403 integration tests |
+| Authentication (client) | Partially implemented | Login page, `localStorage` token, bearer interceptor, `authGuard`. | **Regression:** the 401 → "session expired" handling from `44366cd` lived in the old single-file `app.ts` and was lost in `563f1c9`. The guard checks only that a token exists, so after 60 minutes every page silently shows empty states. | Interceptor/guard tests |
+| Projects | Partially implemented | Create/read/update/search API and pages. | No archive/delete endpoint (the status field exists). No pagination controls. Validation errors return HTTP 500 (see API error handling). | API + component tests |
+| Test suites | Partially implemented | Create/read/update API, `ProjectSuitesPage`, `SuitePage`. | A duplicate suite name hits a unique index and returns 500. No delete. Create errors are not shown in the UI. | API + component tests |
+| Test cases | Partially implemented | Create/read/update API, `CasePage`. | The create form captures only name and priority. No delete. The **simulator never uses test cases**: `SimulationWorker` ignores `TestSuiteId` and generates `"Generated test N"` with `TestCaseId = null`, so `SimulatedOutcome` and `SimulatedDurationMs` on cases have no effect. | API + simulator tests |
+| Simulator: validation & queueing | Implemented but not verified | `SimulationService.Validate`, project/suite ownership check, bounded queue (100). | Validation exceptions become HTTP 500. The single-active-run check is a check-then-insert race. Preview counts use integer division, so they may not sum to the test count. | Unit tests for `Validate`, preview |
+| Simulator: execution | Partially implemented | The database shows 26 consistent completed runs, including 2 × 10,000. | **Run can hang or get stuck Running:** any non-cancellation exception is only logged (`SimulationWorker.cs:767`), and `run.Fail()` is never called. If `PersistResultsAsync` faults, the bounded 2,000-item channel is never drained, so `WriteAsync` blocks forever. **Seed not reproducible:** `HashCode.Combine` is randomized per process (`SimulationWorker.cs:799`). | Execution, failure, seed tests |
+| Simulator: cancellation | Partially implemented | `RunCancellationRegistry`, `CancelAsync`. | **Lost-update race:** `CancelAsync` saves `Cancelled` from one context while the worker's tracked entity (still `Running`) can call `Complete()` and overwrite it, with no concurrency token. Cancelled runs keep their persisted results but their counters are never saved (they stay 0). Cancelling a finished run returns 500. | Cancellation race test |
+| Startup recovery | Implemented but not verified | `ExecutionRecoveryService` marks Queued/Running as Failed. | No active runs existed, so this was not exercised. | Integration test |
+| Result persistence | Verified working (data level) | Every persisted run has result rows equal to its counters. 500-row batches plus `ChangeTracker.Clear()`. | 50,000-case maximum still unmeasured. | Volume test |
+| Execution logs | Missing | Table, endpoint and UI panel exist. | Nothing writes `ExecutionLog`: 0 rows, so the Diagnostics panel is always empty. | — |
+| SignalR live progress | **Broken** | Hub, JWT query-string token, group join, client reconnect and REST fallback exist. | (1) `@microsoft/signalr` defaults to `withCredentials: true` (confirmed in `node_modules`), but the CORS policy lacks `AllowCredentials()`, so the browser blocks cross-origin negotiate. Live updates cannot connect and the UI always falls back to 700 ms polling. (2) SignalR does not inherit the MVC `JsonStringEnumConverter`, so `RunProgress.Status` arrives as a number and breaks `terminal()` and the status label once (1) is fixed. | Hub integration test |
+| REST polling fallback | Implemented but not verified | `SimulatorPage.watch` polls `/api/simulator/runs/{id}` every 700 ms and stops at a terminal status. | The endpoint returns the raw EF entity. The SignalR connection is not stopped when the run finishes. | Component test |
+| Run history & detail | Partially implemented | `RunsController` filters/sort/paging verified (`TotalCount 26`, page of 25). Run detail, results and logs pages exist. | The UI exposes no pagination (only the first 25 runs and 50 results), no date/project/sort filters, and no rerun. List pages have no error handlers. | API + component tests |
+| Dashboard | Verified working (API) | `DashboardController.GetSummary` against the real database: 3 projects, 26 runs, 19,281/3,699/1,145, 79.9% pass. | Shows no trend or failure charts (only tables and metrics). Its run-counter totals diverge from analytics once a run is cancelled mid-flight. | API test |
+| Analytics | Verified working (API) / Broken (UI symptom) | All three endpoints, called through the real controllers against the real database, return correct data: summary 24,125 results, 79.9% pass, 15.3% failure; trends for 2 days; 5 failure categories (1,234 / 1,196 / 1,187 / 42 / 40). | The backend is **not** the cause of "no persisted outcomes". `AnalyticsPage` subscribes without error handlers, so any HTTP failure (expired token, API not running or stale, CORS) renders as the empty state "No persisted outcomes yet". The two likeliest causes are an expired token (no 401 handling) or an API process that was not running current code; the rebuild/restart was never confirmed. No date or project filter in the UI. No chart rendering. | API + component tests |
+| API error handling | Broken | `AddProblemDetails` + `UseExceptionHandler`. | All domain/validation exceptions (`ArgumentException`, `KeyNotFoundException`, `InvalidOperationException`, `DbUpdateException` on unique keys) map to **500** instead of 400/404/409. | API tests |
+| Theme | Implemented but not verified | `ThemeService`, dark tokens, Settings page, header toggle. | The header toggle and the Settings select hold separate state. | Service test |
+| Health checks | Partially implemented | `/health`, `/health/ready`. | `/health/ready` does not check the database. | — |
+| Database & migrations | Verified working | Single migration applied; no pending model changes; relationships and indexes as designed. | Enums are stored as integers (fine, but undocumented). No migration test. | Relational integration test |
+| Automated tests | Broken | Backend: 3 real `TestRun` lifecycle tests plus 1 empty `UnitTest1` placeholder, all passing. Frontend: 2 shell tests, **failing to build** because of the Sass error. | No API, simulator, SignalR, analytics, auth, or component tests. The integration project has no `WebApplicationFactory` package. | Everything listed above |
+| CI | Partially implemented | `.github/workflows/ci.yml` builds and tests .NET and builds Angular. | Does not run `ng test`. Would fail right now if the uncommitted Sass change were pushed. | — |
+| Documentation | Partially implemented | README, architecture, this audit, implementation plan. | No API reference, screenshots, demo script, or seeded demo data story for recruiters. | — |
 
-## Verified execution results
+## Highest-risk defects
 
-The current local SQL Server run used zero simulated duration and maximum configured concurrency. The original end-of-run collection measurement was replaced by the verified bounded-channel/batched-persistence measurement:
+1. **Frontend does not build** (Sass `@use` order). Blocks every UI change and CI.
+2. **Routed pages are unstyled at `HEAD`** (design system scoped to `App`).
+3. **Runs can hang or remain `Running`** after worker exceptions or a persistence failure.
+4. **SignalR cannot connect** (CORS credentials), plus enum serialization once it does.
+5. **Silent client failures**: no 401 handling and no error handlers on analytics/runs pages, which is how a working backend appears as "no persisted outcomes".
+6. **Validation errors return 500.**
+7. **Cancel/complete race** and unsaved counters on cancelled runs.
+8. **Non-reproducible seeded runs.**
 
-| Workload | Terminal status | Persisted results | Elapsed |
-|---:|---|---:|---:|
-| 1,000 | CompletedWithFailures | 1,000 | 654 ms |
-| 10,000 | CompletedWithFailures | 10,000 | 4,235 ms |
+## Commands executed during this audit
 
-These measurements do **not** establish 50,000-case feasibility, memory behavior, or production throughput. Results are now bounded before persistence, but 50,000 cases must not be claimed as validated.
+| Command | Result |
+|---|---|
+| `git status`, `git log`, `git diff`, `git ls-files` | Inspected; 2 uncommitted client files |
+| `dotnet test CQPulse.slnx` | Build succeeded; 3/3 unit and 1/1 placeholder integration tests passed |
+| `npx ng build` (in `src/CQPulse.Client`) | **Failed**: Sass `@use` ordering error |
+| `npx ng test --watch=false` | **Failed**: same Sass error |
+| `dotnet ef migrations has-pending-model-changes --no-build` | No changes since last migration |
+| `dotnet user-secrets list` (values redacted) | 4 expected keys present |
+| `sqlcmd … -K ReadOnly` with `SELECT` counts and aggregates | Figures in "Database contents" |
+| Scratchpad console app (outside the repo) that called `AnalyticsController`, `DashboardController`, `RunsController` directly against the database (read-only queries, no host or seeders started) | All 5 calls returned correct data |
+| Process and port inspection | API and dev server not running; no build-locking processes |
 
-## Priority and next steps
+## Milestone log
 
-1. Add restart reconciliation, execution failure transitions, and durable/retry policy.
-2. Add simulator execution, aggregation, failure, cancellation, and high-volume tests.
-3. Authenticate SignalR and connect the Angular client for real-time progress with REST reconciliation.
-4. Implement computed analytics endpoints and replace illustrative dashboard panels.
-5. Complete management workflows, authorization, routing, and operational documentation.
+### M1 — Build and styling (2026-10-13)
 
-## Commands verified in this audit increment
+| Command | Result |
+|---|---|
+| `npx ng build` (production) | ✅ Passed. `main` 421.29 kB, `styles` 9.50 kB, no budget warnings |
+| `npx ng test --watch=false` | ✅ 2/2 passed |
+| Class coverage check (template classes vs compiled `styles-*.css`) | ✅ No template class without a rule |
 
-```powershell
-dotnet build CQPulse.slnx --no-restore
-dotnet test CQPulse.slnx --no-build
-Set-Location src\CQPulse.Client
-npm run build
-```
-
-The Angular SignalR client production build passed after adding `@microsoft/signalr`. Existing backend unit/integration suites remain limited to four placeholder/lifecycle tests; dedicated simulator performance tests are still required.
-
-Authorization smoke test after registering `AddAuthorization`: anonymous `/api/projects` and `/hubs/runs/negotiate` returned `401`; anonymous `/health` remained `200`.
-
-## Frontend implementation — 2026-10-11
-
-- `app.routes.ts` now configures `/login`, `/dashboard`, `/projects`, project create/edit/suite routes, suite/case routes, `/runs`, `/runs/:runId`, `/simulator`, `/analytics`, `/settings`, a protected default redirect, and not-found handling.
-- `App` is now a shared routed shell. Its sidebar uses `routerLink`/`routerLinkActive`; it no longer changes in-memory section state or renders the prior workflow-completion placeholder.
-- `core.ts` provides typed API contracts/services, a JWT-presence route guard, authentication service, and safely persisted light/dark preference.
-- `pages.ts` implements API-backed project, suite, case, run, run-detail, simulator, analytics, and settings screens. The Simulator invokes the secured preview/start/cancel endpoints, polls persisted state, and reports whether SignalR is connected, reconnecting, or unavailable while REST reconciliation remains active.
-- Browser direct URL handling is provided by Angular routes. Production hosting must still rewrite unknown application paths to `index.html`; this is a deployment server responsibility not represented in the Angular source.
-
-### Frontend verification
-
-```powershell
-Set-Location src\CQPulse.Client
-npm run build
-npm test -- --watch=false
-```
-
-Both commands completed successfully on 2026-10-11. The production build emits an existing component-style budget warning: `app.scss` is 11.24 kB against a 9 kB warning budget. The test suite contains two passing shell/router tests. Route-specific component, API-service, form-validation, and live SignalR integration tests remain required.
+Not yet verified: visual rendering in a real browser in both themes.

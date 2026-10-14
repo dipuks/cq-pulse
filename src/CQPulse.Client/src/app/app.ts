@@ -5,8 +5,7 @@ import { ThemeService, AuthService } from './core';
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
-  templateUrl: './app.html',
-  styleUrl: './app.scss'
+  templateUrl: './app.html'
 })
 export class App implements OnInit {
   protected readonly dark = signal(false);
