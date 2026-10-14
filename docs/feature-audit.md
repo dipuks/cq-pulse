@@ -253,3 +253,44 @@ The migration was created with `--configuration Release` because the user's runn
 | `npx ng test --watch=false` | ✅ 36/36 |
 | `dotnet ef migrations has-pending-model-changes` | ✅ none |
 | Dev DB (read-only) | Unchanged; still only `InitialCreate` applied |
+
+### Q2 — LogTriageAssistant integration (2026-10-13)
+
+**Migration `AddFailureAnalyses` (additive, NOT applied to the development database):** a new `FailureAnalyses` table (FK → `TestRuns`, cascade delete), with indexes on `(TestRunId, RequestedAtUtc)` and `Status`.
+
+**No changes were made to LogTriageAssistant** (its working tree still has the same 27 uncommitted user entries). CQ Pulse uses LTA's existing contract: `GET /api/auth/csrf` → `POST /api/auth/login` (CSRF + cookie, dedicated account) → CSRF token re-issued for the signed-in identity → `POST /api/analyze`.
+
+| Concern | Implementation | Evidence |
+|---|---|---|
+| Lifecycle | `FailureAnalysis` record: Pending → Running → Succeeded / Failed (rejected or malformed) / Unavailable (down, timeout, not configured); attempts, last error, timestamps, external id | `FailureAnalysisTests` (13) |
+| Never alters runs | Analysis runs after the run is final, through `IRunCompletionObserver` (failures logged and ignored); only `FailureAnalyses` rows are written | Run DTO identical before and after analysis, including after an outage |
+| Input | Bounded JSONL of persisted failed results (≤ 2,000 failures, ≤ 1.5 MB; truncation recorded); each line has `runId`, `resultId`, `testCaseId`, CQ Pulse `signature`, category and message | Document assertions in tests |
+| Idempotency | SHA-256 digest of the input; a repeat request returns the existing pending/running/succeeded analysis (200) | `Repeated_requests_for_unchanged_input_reuse_the_analysis` (LTA called once) |
+| Retries | `AddStandardResilienceHandler`: per-attempt timeout, bounded retries for transient failures only, circuit breaker. A re-login is attempted once when the session or CSRF token is rejected. | 503 → 2 calls (1 + RetryCount 1) → Unavailable; malformed → Failed, 1 call; bad credentials → Failed; slow → Unavailable; expired session → 2 logins, success |
+| Safe retry | `POST /api/failure-analyses/{id}/retry` rebuilds input from stored results; the workload is not re-run | Outage → retry → Succeeded (attempt 2) |
+| Recovery | On startup, Running → Unavailable ("interrupted by restart"); Pending → re-queued | `Startup_recovery_…` test |
+| Correlation | `CorrelationMiddleware` accepts or creates `X-Correlation-ID`, echoes it, scopes logs; stored on the analysis and forwarded to LTA | Header asserted at API, record and outbound request |
+| Dependency health | `GET /api/integrations/status` (admin): LTA NotConfigured / Healthy / Unavailable; SmartDog **NotIntegrated**. CQ Pulse `/health/ready` is unaffected by LTA outages | Status tests |
+| Authorization | Administrator role on all analysis and integration endpoints | 401 anonymous / 403 non-admin tests |
+| UI | Run detail → Failure triage panel (state, provider severity, **heuristic** 0–100 signal labelled as such, LTA categories labelled as LTA's, findings with redacted evidence, next steps, correlation id, errors, retry); Settings → Connected services | `failure-triage-panel.spec` (4) |
+
+**End-to-end against a real LogTriageAssistant** (scratch-built from its current working tree, run with `Storage__DatabasePath` in the scratchpad, so LTA's own `App_Data/logtriage.db` was not touched; CQ Pulse API against a temporary `CQPulse_Tests_*` database with all four migrations applied in order, then dropped):
+
+| Check | Result |
+|---|---|
+| Integration status | LogTriageAssistant `Healthy` |
+| Auto-analysis of a 300-test run (210/60/30) | `Succeeded` on attempt 1: severity HIGH, signal 90, findings and 3 recommendations; stored in LTA history for the service account as `cqpulse-run-<runId>.jsonl` |
+| Manual analysis of a 200-test run (30 failures), `X-Correlation-ID: e2e-manual-0002` | 202 with the header echoed; `Succeeded`; **30 findings for 30 failures**; correlation id stored |
+| Repeat request | 200, same analysis id |
+| Run after analysis | Unchanged |
+| Logs | No errors in either service |
+
+Observed and fixed during E2E: a run-summary header line produced a spurious finding (LTA's keyword analyzer matched "failed"), so documents now contain failure lines only. LTA reports its signal score on 0–100; the test double was aligned.
+
+**Observed limitation (LTA behaviour, shown as-is):** LTA's keyword categories do not map onto CQ Pulse's failure categories (e.g. "Simulated Timeout failure" was classified as Network, General or Authentication). The UI labels them as LTA's categories next to CQ Pulse's own.
+
+| Command | Result |
+|---|---|
+| `dotnet test CQPulse.slnx --filter "Category!=Performance"` | ✅ Unit 51/51, Integration 78/78 |
+| `npx ng build` / `npx ng test --watch=false` | ✅ / ✅ 40/40 |
+| Dev DB (read-only) | Unchanged; 0 test databases left |

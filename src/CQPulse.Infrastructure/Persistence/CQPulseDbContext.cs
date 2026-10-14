@@ -17,6 +17,7 @@ public sealed class CQPulseDbContext(DbContextOptions<CQPulseDbContext> options)
     public DbSet<TestRun> TestRuns => Set<TestRun>();
     public DbSet<TestCaseResult> TestCaseResults => Set<TestCaseResult>();
     public DbSet<ExecutionLog> ExecutionLogs => Set<ExecutionLog>();
+    public DbSet<FailureAnalysis> FailureAnalyses => Set<FailureAnalysis>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -85,6 +86,26 @@ public sealed class CQPulseDbContext(DbContextOptions<CQPulseDbContext> options)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.TestCase).WithMany(x => x.Results).HasForeignKey(x => x.TestCaseId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<FailureAnalysis>(entity =>
+        {
+            entity.ToTable("FailureAnalyses");
+            entity.Property(x => x.Provider).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.InputDigest).HasMaxLength(64).IsFixedLength().IsRequired();
+            entity.Property(x => x.CorrelationId).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.RequestedByUserId).HasMaxLength(450);
+            entity.Property(x => x.LastError).HasMaxLength(2_000);
+            entity.Property(x => x.ExternalAnalysisId).HasMaxLength(64);
+            entity.Property(x => x.Severity).HasMaxLength(16);
+            entity.Property(x => x.Summary).HasMaxLength(2_000);
+            entity.Property(x => x.TopCategory).HasMaxLength(100);
+            entity.Property(x => x.FindingsJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.RecommendationsJson).HasColumnType("nvarchar(max)");
+            entity.HasIndex(x => new { x.TestRunId, x.RequestedAtUtc });
+            entity.HasIndex(x => x.Status);
+            // Analyses are derived data: deleting a run removes its analyses.
+            entity.HasOne(x => x.TestRun).WithMany().HasForeignKey(x => x.TestRunId).OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<ExecutionLog>(entity =>

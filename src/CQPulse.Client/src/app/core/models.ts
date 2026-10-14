@@ -85,3 +85,17 @@ export interface TestCaseExecution {
   resultId: string; runId: string; runLabel: string; testCaseNameSnapshot: string; outcome: TestOutcome; durationMs: number;
   completedAtUtc: string; errorMessage?: string | null; failureCategory?: FailureCategory | null;
 }
+
+export type AnalysisStatus = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unavailable';
+export interface AnalysisFinding {
+  lineNumber: number; endLineNumber: number; timestamp?: string | null; message: string; severity: string; category: string; evidence: string; suggestion: string;
+}
+/** External diagnostic analysis. Severity, signal score and findings are the provider's output, shown unchanged. */
+export interface FailureAnalysis {
+  id: string; testRunId: string; provider: string; status: AnalysisStatus;
+  requestedAtUtc: string; startedAtUtc?: string | null; completedAtUtc?: string | null; attempts: number; lastError?: string | null;
+  inputFailureCount: number; inputTruncated: boolean; correlationId: string; externalAnalysisId?: string | null;
+  severity?: string | null; summary?: string | null; signalScore?: number | null; topCategory?: string | null;
+  findings: AnalysisFinding[]; recommendations: string[];
+}
+export interface IntegrationStatus { name: string; configured: boolean; status: string; detail?: string | null; baseUrl?: string | null; checkedAtUtc: string; }

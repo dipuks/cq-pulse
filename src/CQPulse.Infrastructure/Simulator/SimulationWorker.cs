@@ -111,7 +111,8 @@ internal sealed class SimulationWorker(
         var (executionFailure, persistenceFailure) = await ExecuteAsync(run, request, cases, publisher, stoppingToken);
         stoppingToken.ThrowIfCancellationRequested();
 
-        await FinishAsync(db, publisher, runId, executionFailure, persistenceFailure);
+        var (finalStatus, failedCount) = await FinishAsync(db, publisher, runId, executionFailure, persistenceFailure);
+        await NotifyCompletionAsync(scope.ServiceProvider, runId, finalStatus, failedCount);
     }
 
     private async Task<(Exception? Execution, Exception? Persistence)> ExecuteAsync(
@@ -218,7 +219,7 @@ internal sealed class SimulationWorker(
         }
     }
 
-    private async Task FinishAsync(
+    private async Task<(RunStatus Status, int FailedCount)> FinishAsync(
         CQPulseDbContext db, IRunProgressPublisher publisher, Guid runId, Exception? executionFailure, Exception? persistenceFailure)
     {
         if (persistenceFailure is not null)
@@ -270,7 +271,23 @@ internal sealed class SimulationWorker(
             logger.LogInformation("Simulation run {RunId} finished with status {Status}.", runId, run.Status);
             await WriteLogAsync(db, runId, level, logMessage);
             await PublishSafelyAsync(publisher, ToProgress(run, null));
-            return;
+            return (run.Status, run.FailedCount);
+        }
+    }
+
+    /// <summary>Post-run hooks (e.g. failure analysis). The run is already final; hook failures are logged and ignored.</summary>
+    private async Task NotifyCompletionAsync(IServiceProvider services, Guid runId, RunStatus status, int failedCount)
+    {
+        foreach (var observer in services.GetServices<IRunCompletionObserver>())
+        {
+            try
+            {
+                await observer.OnRunCompletedAsync(runId, status, failedCount, CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Run completion hook {Observer} failed for run {RunId}; the run is unaffected.", observer.GetType().Name, runId);
+            }
         }
     }
 

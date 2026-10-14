@@ -3,6 +3,7 @@ using CQPulse.Application.Simulation;
 using CQPulse.Api.Hubs;
 using CQPulse.Api.Auth;
 using CQPulse.Api.Errors;
+using CQPulse.Api.Observability;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using System.Text.Json.Serialization;
 using System.Text;
@@ -16,6 +17,8 @@ builder.Services.AddControllers().AddJsonOptions(options =>
 builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<CQPulse.Application.Common.ICorrelationContext, HttpCorrelationContext>();
 builder.Services.AddCQPulseInfrastructure(builder.Configuration);
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<CQPulse.Infrastructure.Persistence.CQPulseDbContext>("database", tags: ["ready"]);
@@ -67,6 +70,7 @@ builder.Services.AddCors(options => options.AddPolicy("client", policy =>
 
 var app = builder.Build();
 
+app.UseMiddleware<CorrelationMiddleware>();
 app.UseExceptionHandler();
 app.UseHttpsRedirection();
 app.UseCors("client");

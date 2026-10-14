@@ -8,9 +8,10 @@ import { TEST_OUTCOMES, TestOutcome, isTerminal } from '../../core/models';
 import { DataState } from '../../shared/data-state';
 import { loadable } from '../../shared/loadable';
 import { Pager } from '../../shared/pager';
+import { FailureTriagePanel } from './failure-triage-panel';
 
 @Component({
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, DataState, Pager],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, DataState, Pager, FailureTriagePanel],
   template: `
     <section class="page-heading">
       <div>
@@ -60,6 +61,7 @@ import { Pager } from '../../shared/pager';
         </dl>
         <details><summary>Submitted configuration</summary><pre class="config">{{ formatConfig(r.configurationSnapshot) }}</pre></details>
       </section>
+      <app-failure-triage [runId]="r.id" [runFinished]="isTerminal(r.status)" [failedCount]="r.failedCount" />
     }
     <section class="panel">
       <div class="panel-title">

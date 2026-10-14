@@ -8,3 +8,4 @@ public enum RunStatus { Queued, Running, Passed, CompletedWithFailures, Failed, 
 public enum WorkloadSource { Synthetic, Catalog }
 public enum FailureCategory { UiElement, ApiError, Timeout, DataValidation, Environment }
 public enum LogLevel { Trace, Information, Warning, Error }
+public enum AnalysisStatus { Pending, Running, Succeeded, Failed, Unavailable }

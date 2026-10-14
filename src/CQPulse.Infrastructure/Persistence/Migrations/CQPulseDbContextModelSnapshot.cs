@@ -57,6 +57,94 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                     b.ToTable("ExecutionLogs", (string)null);
                 });
 
+            modelBuilder.Entity("CQPulse.Domain.Entities.FailureAnalysis", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ExternalAnalysisId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("FindingsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("InputDigest")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nchar(64)")
+                        .IsFixedLength();
+
+                    b.Property<int>("InputFailureCount")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("InputTruncated")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RecommendationsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("RequestedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RequestedByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("Severity")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<double?>("SignalScore")
+                        .HasColumnType("float");
+
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid>("TestRunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TopCategory")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("TestRunId", "RequestedAtUtc");
+
+                    b.ToTable("FailureAnalyses", (string)null);
+                });
+
             modelBuilder.Entity("CQPulse.Domain.Entities.Project", b =>
                 {
                     b.Property<Guid>("Id")
@@ -509,6 +597,17 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("TestCaseResult");
+
+                    b.Navigation("TestRun");
+                });
+
+            modelBuilder.Entity("CQPulse.Domain.Entities.FailureAnalysis", b =>
+                {
+                    b.HasOne("CQPulse.Domain.Entities.TestRun", "TestRun")
+                        .WithMany()
+                        .HasForeignKey("TestRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("TestRun");
                 });

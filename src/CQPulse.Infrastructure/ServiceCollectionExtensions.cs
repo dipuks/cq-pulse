@@ -1,6 +1,9 @@
+using CQPulse.Application.Analysis;
 using CQPulse.Application.Simulation;
 using CQPulse.Infrastructure.Identity;
 using CQPulse.Infrastructure.Catalog;
+using CQPulse.Infrastructure.Integrations.LogTriage;
+using Microsoft.Extensions.Http.Resilience;
 using CQPulse.Infrastructure.Persistence;
 using CQPulse.Infrastructure.Simulator;
 using Microsoft.AspNetCore.Identity;
@@ -35,6 +38,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ISimulationService, SimulationService>();
         services.AddHostedService<ExecutionRecoveryService>();
         services.AddHostedService<SimulationWorker>();
+        AddLogTriageIntegration(services, configuration);
+        services.AddScoped<CQPulse.Infrastructure.Integrations.IIntegrationStatusService, CQPulse.Infrastructure.Integrations.IntegrationStatusService>();
         services.AddIdentityCore<ApplicationUser>(options =>
             {
                 options.Password.RequiredLength = 12;
@@ -51,5 +56,43 @@ public static class ServiceCollectionExtensions
             .AddEntityFrameworkStores<CQPulseDbContext>();
 
         return services;
+    }
+
+    private static void AddLogTriageIntegration(IServiceCollection services, IConfiguration configuration)
+    {
+        var settings = configuration.GetSection(LogTriageOptions.SectionName).Get<LogTriageOptions>() ?? new LogTriageOptions();
+        services.AddOptions<LogTriageOptions>().Bind(configuration.GetSection(LogTriageOptions.SectionName));
+        services.AddSingleton<LogTriageSession>();
+        services.AddSingleton<AnalysisQueue>();
+        services.AddScoped<FailureAnalysisService>();
+        services.AddScoped<IFailureAnalysisService>(provider => provider.GetRequiredService<FailureAnalysisService>());
+        services.AddScoped<IRunCompletionObserver>(provider => provider.GetRequiredService<FailureAnalysisService>());
+        services.AddHostedService<AnalysisWorker>();
+
+        var attemptTimeout = TimeSpan.FromSeconds(Math.Max(1, settings.AttemptTimeoutSeconds));
+        services.AddHttpClient<LogTriageClient>(client =>
+            {
+                if (Uri.TryCreate(settings.BaseUrl, UriKind.Absolute, out var baseUrl))
+                    client.BaseAddress = new Uri(baseUrl.ToString().TrimEnd('/') + "/");
+                client.Timeout = Timeout.InfiniteTimeSpan; // the resilience pipeline owns timeouts
+            })
+            // The handler keeps LogTriageAssistant's session cookie, so it is not recycled; connections still are.
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                UseCookies = true,
+                CookieContainer = new System.Net.CookieContainer(),
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+            })
+            .SetHandlerLifetime(Timeout.InfiniteTimeSpan)
+            .AddStandardResilienceHandler(resilience =>
+            {
+                resilience.AttemptTimeout.Timeout = attemptTimeout;
+                resilience.Retry.MaxRetryAttempts = Math.Max(0, settings.RetryCount);
+                resilience.Retry.Delay = TimeSpan.FromMilliseconds(Math.Max(1, settings.RetryBaseDelayMilliseconds));
+                resilience.Retry.UseJitter = true;
+                resilience.TotalRequestTimeout.Timeout = attemptTimeout * (settings.RetryCount + 2);
+                resilience.CircuitBreaker.SamplingDuration = attemptTimeout * 2;
+                resilience.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(15);
+            });
     }
 }

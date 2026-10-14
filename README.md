@@ -57,3 +57,19 @@ Tests get users through `ApiFixture`: `CreateAdministratorClientAsync()`, `Creat
 ## Current limitations
 
 The API provides JWT login and a development-only admin seeding mechanism. The browser login flow, route authorization, management screens, batched result persistence for very large workloads, analytics, and CI remain in active development. The simulator is an MVP in-process worker and is not a durable distributed job system.
+
+## Failure triage with LogTriageAssistant (optional)
+
+CQ Pulse can send a run's persisted failures to a separately running [LogTriageAssistant](https://github.com/dipuks/LogTriageAssistant) for diagnostic analysis (severity, categorized findings with redacted evidence, suggested next steps). Nothing in LogTriageAssistant changes: CQ Pulse uses its existing API with a dedicated account.
+
+1. Start LogTriageAssistant over HTTPS (its session cookie is Secure-only), e.g. its `https` profile on `https://localhost:7291`.
+2. Register a dedicated account in LogTriageAssistant for CQ Pulse (sign-up page or `POST /api/auth/register`).
+3. Configure CQ Pulse with user secrets (never in appsettings files):
+
+```powershell
+dotnet user-secrets set 'Integrations:LogTriage:BaseUrl' 'https://localhost:7291' --project src\CQPulse.Api
+dotnet user-secrets set 'Integrations:LogTriage:Username' '<lta-service-account>' --project src\CQPulse.Api
+dotnet user-secrets set 'Integrations:LogTriage:Password' '<lta-service-password>' --project src\CQPulse.Api
+```
+
+Runs that finish with failures are analysed automatically (`Integrations:LogTriage:AutoAnalyzeFailedRuns`, default `true`), or from **Run detail → Failure triage**. Analyses are asynchronous and never change a run. If the service is down, the analysis is recorded as *Unavailable* with the reason and can be retried without re-running the workload. **Settings → Connected services** shows whether each integration is configured and reachable.

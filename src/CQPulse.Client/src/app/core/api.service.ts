@@ -4,7 +4,7 @@ import { API_BASE_URL } from './api-config';
 import {
   AnalyticsSummary, DashboardSummary, FailureCount, PageResponse, Project, ProjectSummary, RunDetail, RunLog, RunResult, RunSummary,
   SaveProject, SaveSuite, SaveTestCase, SimulationPreview, SimulationRequest, SimulatorLimits, Suite, TestCase, TestCaseExecution,
-  TestOutcome, TrendPoint
+  TestOutcome, TrendPoint, FailureAnalysis, IntegrationStatus
 } from './models';
 
 export type QueryParams = Record<string, string | number | boolean | null | undefined>;
@@ -69,4 +69,9 @@ export class ApiService {
   analyticsSummary(query: QueryParams = {}) { return this.http.get<AnalyticsSummary>(`${this.api}/analytics/summary`, { params: toParams(query) }); }
   trends(query: QueryParams = {}) { return this.http.get<TrendPoint[]>(`${this.api}/analytics/execution-trends`, { params: toParams(query) }); }
   failures(query: QueryParams = {}) { return this.http.get<FailureCount[]>(`${this.api}/analytics/failure-breakdown`, { params: toParams(query) }); }
+  failureAnalyses(runId: string) { return this.http.get<FailureAnalysis[]>(`${this.api}/runs/${runId}/failure-analyses`); }
+  requestFailureAnalysis(runId: string) { return this.http.post<FailureAnalysis>(`${this.api}/runs/${runId}/failure-analyses`, {}); }
+  failureAnalysis(id: string) { return this.http.get<FailureAnalysis>(`${this.api}/failure-analyses/${id}`); }
+  retryFailureAnalysis(id: string) { return this.http.post<FailureAnalysis>(`${this.api}/failure-analyses/${id}/retry`, {}); }
+  integrationStatus() { return this.http.get<IntegrationStatus[]>(`${this.api}/integrations/status`); }
 }

@@ -67,3 +67,12 @@ public interface IRunProgressPublisher
 {
     Task PublishAsync(RunProgress progress, CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Notified after a run reaches a terminal state and its results are persisted. Observers run after the run is final
+/// and their failures are logged and ignored, so they can never change a run's outcome.
+/// </summary>
+public interface IRunCompletionObserver
+{
+    Task OnRunCompletedAsync(Guid runId, RunStatus status, int failedCount, CancellationToken cancellationToken);
+}
