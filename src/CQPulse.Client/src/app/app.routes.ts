@@ -1,10 +1,11 @@
 import { Routes } from '@angular/router';
 import { LoginPage, DashboardPage, ProjectsPage, ProjectEditorPage, ProjectSuitesPage, SuitePage, CasePage, RunsPage, RunDetailPage, SimulatorPage, AnalyticsPage, SettingsPage, NotFoundPage } from './pages';
 import { authGuard } from './core';
+import { Shell } from './shell';
 
 export const routes: Routes = [
   { path: 'login', component: LoginPage },
-  { path: '', canActivate: [authGuard], children: [
+  { path: '', component: Shell, canActivate: [authGuard], children: [
     { path: 'dashboard', component: DashboardPage },
     { path: 'projects', component: ProjectsPage },
     { path: 'projects/new', component: ProjectEditorPage },

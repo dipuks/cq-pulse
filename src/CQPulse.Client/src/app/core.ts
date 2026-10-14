@@ -54,6 +54,7 @@ const API = 'https://localhost:7256/api';
     const dark = savedTheme === 'dark' || (!savedTheme && typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches);
     return this.set(dark);
   }
+  isDark(): boolean { return document.documentElement.dataset['theme'] === 'dark'; }
   set(dark: boolean): boolean { document.documentElement.dataset['theme'] = dark ? 'dark' : 'light'; localStorage.setItem('cq-pulse-theme', dark ? 'dark' : 'light'); return dark; }
 }
 export const authGuard: CanActivateFn = () => Boolean(localStorage.getItem('cq-pulse-token')) || inject(Router).createUrlTree(['/login']);

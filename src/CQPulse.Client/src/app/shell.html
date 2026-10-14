@@ -1,0 +1,18 @@
+<main class="shell">
+  <aside class="sidebar">
+    <a class="brand" routerLink="/dashboard"><span>CQ</span> Pulse<small>CLOUD QA</small></a>
+    <nav aria-label="Main navigation">
+      <a routerLink="/dashboard" routerLinkActive="active">▣ Dashboard</a>
+      <a routerLink="/projects" routerLinkActive="active">▤ Projects</a>
+      <a routerLink="/runs" routerLinkActive="active">▷ Test runs</a>
+      <a routerLink="/simulator" routerLinkActive="active">◈ Simulator</a>
+      <a routerLink="/analytics" routerLinkActive="active">⌁ Analytics</a>
+      <a routerLink="/settings" routerLinkActive="active">⚙ Settings</a>
+    </nav>
+    <div class="sidebar-note"><strong>Ready to scale</strong><br>Run realistic workloads with bounded concurrency.</div>
+  </aside>
+  <section class="content">
+    <header class="topbar"><a class="mobile-brand" routerLink="/dashboard">CQ Pulse</a><span class="header-caption">Quality operations workspace</span><button class="theme" (click)="toggleTheme()" [attr.aria-pressed]="dark()">{{ dark() ? '☀ Light' : '◐ Dark' }}</button><button class="theme" (click)="signOut()">Sign out</button><span class="avatar">CQ</span></header>
+    <router-outlet />
+  </section>
+</main>

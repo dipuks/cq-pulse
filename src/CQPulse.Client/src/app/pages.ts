@@ -1,17 +1,23 @@
 import { DecimalPipe, NgFor, NgIf, DatePipe } from '@angular/common';
 import { Component, DestroyRef, OnDestroy, OnInit, inject, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { HubConnection, HubConnectionBuilder } from '@microsoft/signalr';
 import { ApiService, AuthService, Project, Run, SimulationRequest, Suite, TestCase, ThemeService } from './core';
 
+/** Status 0 means the request never reached the API (stopped, wrong URL, TLS/CORS), not bad credentials. */
+export const loginError = (status: number) =>
+  status === 0 ? 'Cannot reach the CQ Pulse API. Make sure it is running and try again.'
+  : status === 401 ? 'Invalid email or password.'
+  : `Sign in failed (HTTP ${status}). Please try again.`;
 const terminal = (status: string) => ['Passed', 'CompletedWithFailures', 'Failed', 'Cancelled'].includes(status);
 const request = (): SimulationRequest => ({ projectId: '', testSuiteId: null, testCount: 100, maxConcurrency: 12, minimumDurationMs: 20, maximumDurationMs: 90, passPercentage: 88, failurePercentage: 8, skippedPercentage: 4, failureCategories: ['UiElement', 'ApiError', 'Timeout', 'DataValidation', 'Environment'], randomSeed: null, runLabel: 'Simulator run' });
 @Component({ standalone: true, imports: [FormsModule, NgIf], template: `<main class="login-page"><section class="login-card"><a class="brand"><span>CQ</span> Pulse<small>CLOUD QA</small></a><p class="eyebrow">SECURE WORKSPACE</p><h1>Welcome back</h1><p class="intro">Sign in to manage quality operations.</p><label>Email<input [(ngModel)]="email" type="email"></label><label>Password<input [(ngModel)]="password" type="password"></label><p class="error" *ngIf="error()">{{error()}}</p><button class="primary wide" (click)="login()" [disabled]="busy()">{{busy() ? 'Signing in…' : 'Sign in'}}</button></section></main>` })
 export class LoginPage {
   email = ''; password = ''; protected error = signal(''); protected busy = signal(false);
   constructor(private api: AuthService, private router: Router) {}
-  login(): void { this.busy.set(true); this.error.set(''); this.api.login(this.email, this.password).subscribe({ next: x => { localStorage.setItem('cq-pulse-token', x.accessToken); void this.router.navigateByUrl('/dashboard'); }, error: () => { this.busy.set(false); this.error.set('Sign in failed. Check your administrator credentials.'); } }); }
+  login(): void { this.busy.set(true); this.error.set(''); this.api.login(this.email, this.password).subscribe({ next: x => { localStorage.setItem('cq-pulse-token', x.accessToken); void this.router.navigateByUrl('/dashboard'); }, error: (e: HttpErrorResponse) => { this.busy.set(false); this.error.set(loginError(e.status)); } }); }
 }
 @Component({ standalone: true, imports: [NgFor, NgIf, RouterLink], template: `<section class="hero"><div><p class="eyebrow">QUALITY COMMAND CENTER</p><h1>See every run.<br><em>Know every risk.</em></h1><p class="intro">Live operational data from your CQ Pulse workspace.</p></div><a class="primary" routerLink="/simulator">▶ Start simulation</a></section><p class="error" *ngIf="error()">{{error()}}</p><section class="metrics" *ngIf="summary() as s"><article><small>Projects</small><strong>{{s.projectCount}}</strong><i>Active workspaces</i></article><article><small>Test cases</small><strong>{{s.testCaseCount}}</strong><i>Managed tests</i></article><article><small>Passed</small><strong>{{s.passed}}</strong><i>{{s.passRate}}% pass rate</i></article><article><small>Failures</small><strong>{{s.failed}}</strong><i>Need investigation</i></article></section><section class="grid"><article class="panel"><div class="panel-title"><div><p class="eyebrow">RECENT EXECUTIONS</p><h2>Run activity</h2></div><a routerLink="/runs">View all →</a></div><div class="row" *ngFor="let run of runs()"><a [routerLink]="['/runs',run.id]">{{run.runLabel}}</a><span class="status" [attr.data-status]="run.status">{{run.status}}</span><span>{{run.completedTests}} / {{run.totalTests}}</span></div><p class="empty" *ngIf="!runs().length">No runs have been recorded.</p></article><article class="panel"><div class="panel-title"><div><p class="eyebrow">PROJECTS</p><h2>Quality portfolio</h2></div><a routerLink="/projects">View all →</a></div><div class="row" *ngFor="let p of projects()"><a [routerLink]="['/projects',p.id]">{{p.name}}</a><span class="status" [attr.data-status]="p.status">{{p.status}}</span></div><p class="empty" *ngIf="!projects().length">Create a project to begin.</p></article></section>` })
 export class DashboardPage implements OnInit {

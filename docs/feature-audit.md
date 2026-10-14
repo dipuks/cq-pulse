@@ -103,3 +103,33 @@ For every run, `TotalTests = CompletedTests = Passed + Failed + Skipped = persis
 | Class coverage check (template classes vs compiled `styles-*.css`) | ✅ No template class without a rule |
 
 Not yet verified: visual rendering in a real browser in both themes.
+
+### Login investigation and layout fix (2026-10-13)
+
+**Symptom:** `/login` showed "Sign in failed. Check your administrator credentials." and rendered inside the authenticated shell.
+
+**Root cause (login):** the API was not running (nothing listening on 7256; only the Angular dev server on 4200), so the request never connected (HTTP status 0). `LoginPage` showed the same "credentials" message for every error, which made a connectivity failure look like bad credentials. Everything else was verified healthy:
+
+| Check | Result |
+|---|---|
+| Dev admin account vs user secrets (read-only, booleans only) | 1 user; email matches `DevelopmentAdmin:Email`; role `Administrator`; email confirmed; not locked out; stored hash verifies against `DevelopmentAdmin:Password` |
+| `Jwt:SigningKey` | Present, at least 32 characters |
+| HTTPS dev certificate | Trusted |
+| API started temporarily (`dotnet run --launch-profile https`), then stopped | Started cleanly; no warnings or errors logged |
+| CORS preflight `OPTIONS /api/auth/login` from `http://localhost:4200` | 204, origin allowed |
+| `POST /api/auth/login` with configured credentials | 200, three-part JWT issued |
+| `POST /api/auth/login` with wrong password | 401 `Invalid email or password.` |
+| `GET /api/auth/me` with token | 200 |
+| `GET /api/projects` anonymous / with token | 401 / 200 |
+
+**Root cause (layout):** the sidebar shell was the root `App` template, so it wrapped every route including `/login`.
+
+**Fix:** the shell moved to a `Shell` component used as the parent of the guarded routes (`app.routes.ts`). `App` is now a bare `<router-outlet>` that initializes the theme. `LoginPage` distinguishes status 0 (API unreachable), 401 (invalid credentials) and other statuses. The backend, authentication configuration and database are unchanged.
+
+| Command | Result |
+|---|---|
+| `npx ng build` | ✅ Passed, no budget warnings |
+| `npx ng test --watch=false` | ✅ 8/8 passed (new: `/login` has no shell; guard redirects without token; guarded route renders in shell with active nav; login error mapping) |
+| Mutation check (login placed back inside the guarded shell) | ✅ Two routing tests failed as expected; file restored |
+
+Backend authentication has no automated tests yet (planned for M2/M3 authorization matrix). The HTTP checks above were run manually.
