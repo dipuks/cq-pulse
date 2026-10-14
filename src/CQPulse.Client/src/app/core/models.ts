@@ -99,3 +99,27 @@ export interface FailureAnalysis {
   findings: AnalysisFinding[]; recommendations: string[];
 }
 export interface IntegrationStatus { name: string; configured: boolean; status: string; detail?: string | null; baseUrl?: string | null; checkedAtUtc: string; }
+
+export interface InsightWindow { fromUtc: string; toUtc: string; previousFromUtc: string; }
+export interface FailureSignatureItem {
+  signature: string; category?: FailureCategory | null; normalizedMessage: string; sampleMessage: string; occurrences: number; previousOccurrences: number;
+  affectedRuns: number; affectedTestCases: number; firstSeenUtc: string; lastSeenUtc: string; messageVariants: number; countsAreUpperBounds: boolean;
+}
+export interface FailureSignatureReport { window: InsightWindow; totalFailures: number; signatures: FailureSignatureItem[]; }
+export interface FlakyCandidate {
+  testCaseId: string; testCaseName: string; testSuiteId: string; suiteName: string; configuredOutcome: SimulatedOutcome;
+  executions: number; passed: number; failed: number; skipped: number; failureRate: number; outcomeChanges: number; randomnessIsConfigured: boolean;
+}
+export interface FlakyReport { window: InsightWindow; minimumExecutions: number; casesEvaluated: number; candidates: FlakyCandidate[]; }
+export interface DailyFailureRate {
+  date: string; results: number; failed: number; failureRate: number; baselineMean?: number | null; baselineStdDev?: number | null;
+  baselineDays: number; zScore?: number | null; isAnomaly: boolean; assessment: string;
+}
+export interface AnomalyReport {
+  window: InsightWindow; baselineDays: number; minimumBaselineDays: number; minimumDailyResults: number; threshold: number; method: string; days: DailyFailureRate[];
+}
+export interface QualityTrend {
+  projectId: string; projectName: string; results: number; failed: number; failureRate: number;
+  previousResults: number; previousFailed: number; previousFailureRate?: number | null; changePercentagePoints?: number | null;
+}
+export interface QualityTrendReport { window: InsightWindow; projects: QualityTrend[]; predictionStatus: string; }

@@ -4,7 +4,7 @@ import { API_BASE_URL } from './api-config';
 import {
   AnalyticsSummary, DashboardSummary, FailureCount, PageResponse, Project, ProjectSummary, RunDetail, RunLog, RunResult, RunSummary,
   SaveProject, SaveSuite, SaveTestCase, SimulationPreview, SimulationRequest, SimulatorLimits, Suite, TestCase, TestCaseExecution,
-  TestOutcome, TrendPoint, FailureAnalysis, IntegrationStatus
+  TestOutcome, TrendPoint, FailureAnalysis, IntegrationStatus, AnomalyReport, FailureSignatureReport, FlakyReport, QualityTrendReport
 } from './models';
 
 export type QueryParams = Record<string, string | number | boolean | null | undefined>;
@@ -73,5 +73,8 @@ export class ApiService {
   requestFailureAnalysis(runId: string) { return this.http.post<FailureAnalysis>(`${this.api}/runs/${runId}/failure-analyses`, {}); }
   failureAnalysis(id: string) { return this.http.get<FailureAnalysis>(`${this.api}/failure-analyses/${id}`); }
   retryFailureAnalysis(id: string) { return this.http.post<FailureAnalysis>(`${this.api}/failure-analyses/${id}/retry`, {}); }
-  integrationStatus() { return this.http.get<IntegrationStatus[]>(`${this.api}/integrations/status`); }
+  integrationStatus() { return this.http.get<IntegrationStatus[]>(`${this.api}/integrations/status`); }  failureSignatures(query: QueryParams = {}) { return this.http.get<FailureSignatureReport>(`${this.api}/insights/failure-signatures`, { params: toParams(query) }); }
+  flakyTests(query: QueryParams = {}) { return this.http.get<FlakyReport>(`${this.api}/insights/flaky-tests`, { params: toParams(query) }); }
+  anomalies(query: QueryParams = {}) { return this.http.get<AnomalyReport>(`${this.api}/insights/anomalies`, { params: toParams(query) }); }
+  qualityTrends(query: QueryParams = {}) { return this.http.get<QualityTrendReport>(`${this.api}/insights/quality-trends`, { params: toParams(query) }); }
 }

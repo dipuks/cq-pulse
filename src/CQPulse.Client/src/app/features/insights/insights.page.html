@@ -1,0 +1,106 @@
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">QUALITY INTELLIGENCE</p>
+    <h1>Insights</h1>
+    <p class="intro">Patterns in persisted results: recurring failures, flaky tests and unusual days. Every figure comes from stored data with the rule shown; nothing here is a forecast.</p>
+  </div>
+</section>
+<form class="panel filters" (ngSubmit)="apply()" aria-label="Insight filters">
+  <label>Project
+    <select [(ngModel)]="projectId" name="project">
+      <option value="">All projects</option>
+      @for (p of projects.value()?.items ?? []; track p.id) { <option [value]="p.id">{{ p.name }}</option> }
+    </select>
+  </label>
+  <label>Window (UTC days, including today)
+    <select [(ngModel)]="days" name="days">
+      <option [ngValue]="7">7 days</option><option [ngValue]="14">14 days</option><option [ngValue]="30">30 days</option><option [ngValue]="90">90 days</option>
+    </select>
+  </label>
+  <button type="submit" class="secondary">Apply</button>
+</form>
+
+<section class="panel">
+  <div class="panel-title">
+    <div><p class="eyebrow">ANOMALIES</p><h2>Unusual daily failure rates</h2></div>
+  </div>
+  @if (anomalies.value(); as a) {
+    <p class="empty"><small>{{ a.method }} Baseline: {{ a.baselineDays }} days (at least {{ a.minimumBaselineDays }} with ≥ {{ a.minimumDailyResults }} results); threshold {{ a.threshold }}σ.</small></p>
+    <p>{{ flaggedDays().length }} flagged of {{ assessedDays() }} assessable days ({{ daysWithData().length }} days with results in the window).</p>
+    @for (d of flaggedDays(); track d.date) {
+      <div class="row">
+        <strong>{{ d.date | date: 'mediumDate' }}</strong>
+        <span class="status" data-status="Failed">{{ d.assessment }}</span>
+        <span>{{ d.failureRate | percent: '1.0-1' }} vs baseline {{ d.baselineMean | percent: '1.0-1' }} ± {{ d.baselineStdDev | percent: '1.0-1' }} (z = {{ d.zScore }}, {{ d.results | number }} results)</span>
+      </div>
+    }
+    <details>
+      <summary>All days in the window</summary>
+      <div class="table-row heading"><span>Date (UTC)</span><span>Failure rate</span><span>Results</span><span>Assessment</span></div>
+      @for (d of daysWithData(); track d.date) {
+        <div class="table-row">
+          <span>{{ d.date | date: 'mediumDate' }}</span><span>{{ d.failureRate | percent: '1.0-1' }}</span><span>{{ d.results | number }}</span><span>{{ d.assessment }}</span>
+        </div>
+      }
+    </details>
+  }
+  <app-data-state [loading]="anomalies.loading()" [loaded]="anomalies.loaded()" [error]="anomalies.error()"
+    [empty]="!daysWithData().length" emptyText="No results in this window." (retry)="anomalies.reload()" />
+</section>
+
+<section class="grid">
+  <article class="panel">
+    <div class="panel-title"><div><p class="eyebrow">RECURRING FAILURES</p><h2>Failure signatures</h2></div></div>
+    <p class="empty"><small>Grouped by failure category and normalized message (numbers, ids and quoted values replaced). Ordered by occurrences in the window.</small></p>
+    @for (s of signatures.value()?.signatures ?? []; track s.signature) {
+      <div class="log">
+        <b>{{ s.occurrences | number }}×</b> <span class="status">{{ s.category ?? 'Uncategorized' }}</span>
+        <span class="empty"> {{ change(s.occurrences, s.previousOccurrences) }}</span>
+        <div><code>{{ s.normalizedMessage }}</code></div>
+        <small class="empty">
+          {{ s.affectedRuns | number }} runs · {{ s.affectedTestCases | number }} catalog test cases{{ s.countsAreUpperBounds ? ' (upper bound across ' + s.messageVariants + ' message variants)' : '' }}
+          · last seen {{ s.lastSeenUtc | date: 'short' }} · signature {{ s.signature }}
+        </small>
+      </div>
+    }
+    <app-data-state [loading]="signatures.loading()" [loaded]="signatures.loaded()" [error]="signatures.error()"
+      [empty]="!signatures.value()?.signatures?.length" emptyText="No failures in this window." (retry)="signatures.reload()" />
+  </article>
+
+  <article class="panel">
+    <div class="panel-title"><div><p class="eyebrow">FLAKY CANDIDATES</p><h2>Mixed pass/fail test cases</h2></div></div>
+    @if (flaky.value(); as f) {
+      <p class="empty"><small>Catalog test cases that both passed and failed in the window, with at least {{ f.minimumExecutions }} executions ({{ f.casesEvaluated | number }} cases evaluated).</small></p>
+    }
+    @for (c of flaky.value()?.candidates ?? []; track c.testCaseId) {
+      <div class="log">
+        <a [routerLink]="['/test-cases', c.testCaseId]">{{ c.testCaseName }}</a> <small class="empty">{{ c.suiteName }}</small>
+        <div>{{ c.passed | number }} passed · {{ c.failed | number }} failed · {{ c.skipped | number }} skipped of {{ c.executions | number }}
+          · failure rate {{ c.failureRate | percent: '1.0-1' }} · {{ c.outcomeChanges }} outcome changes</div>
+        @if (c.randomnessIsConfigured) {
+          <small class="empty">Expected: this case is configured with a Random simulated outcome, so the simulator varies it on purpose.</small>
+        } @else {
+          <small class="empty">Configured outcome is {{ c.configuredOutcome }}; mixed results mean the configuration changed during the window.</small>
+        }
+      </div>
+    }
+    <app-data-state [loading]="flaky.loading()" [loaded]="flaky.loaded()" [error]="flaky.error()"
+      [empty]="!flaky.value()?.candidates?.length" emptyText="No test case has enough mixed results in this window." (retry)="flaky.reload()" />
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-title"><div><p class="eyebrow">PROJECT TRENDS</p><h2>Failure rate, this window vs the previous one</h2></div></div>
+  <div class="table-row heading"><span>Project</span><span>Now</span><span>Before</span><span>Change</span></div>
+  @for (t of trends.value()?.projects ?? []; track t.projectId) {
+    <div class="table-row">
+      <strong><a [routerLink]="['/projects', t.projectId]">{{ t.projectName }}</a><small>{{ t.results | number }} results now · {{ t.previousResults | number }} before</small></strong>
+      <span>{{ t.failureRate | percent: '1.0-1' }}</span>
+      <span>{{ t.previousFailureRate != null ? (t.previousFailureRate | percent: '1.0-1') : 'no data' }}</span>
+      <span>{{ t.changePercentagePoints != null ? ((t.changePercentagePoints > 0 ? '+' : '') + t.changePercentagePoints + ' pp') : '—' }}</span>
+    </div>
+  }
+  <app-data-state [loading]="trends.loading()" [loaded]="trends.loaded()" [error]="trends.error()"
+    [empty]="!trends.value()?.projects?.length" emptyText="No results in this window." (retry)="trends.reload()" />
+  @if (trends.value(); as t) { <p class="empty"><small>Prediction: {{ t.predictionStatus }}</small></p> }
+</section>

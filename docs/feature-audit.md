@@ -294,3 +294,21 @@ Observed and fixed during E2E: a run-summary header line produced a spurious fin
 | `dotnet test CQPulse.slnx --filter "Category!=Performance"` | ✅ Unit 51/51, Integration 78/78 |
 | `npx ng build` / `npx ng test --watch=false` | ✅ / ✅ 40/40 |
 | Dev DB (read-only) | Unchanged; 0 test databases left |
+
+### Q3 — Historical quality intelligence (2026-10-13)
+
+All computed by CQ Pulse from its own persisted results; no schema change. Windows are the last N whole UTC days including today, compared with the previous N days.
+
+| Endpoint (admin) | Rule (shown in the UI) | Evidence |
+|---|---|---|
+| `GET /api/insights/failure-signatures` | Signature = category + message normalized (GUIDs, hex ids, quoted values, numbers → placeholders), 12-hex SHA-256 id. Exact occurrence counts; affected runs/tests exact per message variant, flagged as upper bounds when variants merge. Change vs the previous window. Grouping in SQL (top 500 message groups), merging in memory. | `InsightsTests.Failure_signatures_…`; normalization unit tests |
+| `GET /api/insights/flaky-tests` | Catalog case with ≥ `minExecutions` executions and both passes and failures; failure rate; chronological pass↔fail changes (skips ignored). States when the case's simulated outcome is `Random`, i.e. the variation is configured. | Fixture test plus an end-to-end catalog run with a 50/50 Random case |
+| `GET /api/insights/anomalies` | Day flagged when \|rate − baseline mean\| > k·σ (z-score), baseline = preceding days with ≥ minimum results, σ floor 1 point; days lacking volume or baseline are reported as "too few results" or "insufficient baseline", not guessed | `InsightCalculatorTests` (spike, normal, flat-baseline floor, drop, insufficient data, low-volume baseline days); integration test with 8 baseline days and a 60% day |
+| `GET /api/insights/quality-trends` | Per-project failure rate now vs the previous window, change in percentage points. **Prediction explicitly not offered** (statement returned by the API and shown) | `Quality_trends_compare_windows_and_decline_to_predict` |
+
+UI: new **Insights** page (navigation) with project and window filters, flagged days with baseline, σ and z, all-days table, signatures with change vs the previous window, flaky candidates with the configured-randomness caveat, project trend table and the prediction statement. `insights.page.spec`.
+
+| Command | Result |
+|---|---|
+| `dotnet test CQPulse.slnx --filter "Category!=Performance"` | ✅ Unit 66/66, Integration 84/84 |
+| `npx ng build` / `npx ng test --watch=false` | ✅ / ✅ 41/41 |

@@ -18,6 +18,7 @@ export const routes: Routes = [
       { path: 'runs', title: 'Test runs · CQ Pulse', loadComponent: () => import('./features/runs/runs.page').then(m => m.RunsPage) },
       { path: 'runs/:runId', title: 'Run detail · CQ Pulse', loadComponent: () => import('./features/runs/run-detail.page').then(m => m.RunDetailPage) },
       { path: 'simulator', title: 'Simulator · CQ Pulse', loadComponent: () => import('./features/simulator/simulator.page').then(m => m.SimulatorPage) },
+      { path: 'insights', title: 'Insights · CQ Pulse', loadComponent: () => import('./features/insights/insights.page').then(m => m.InsightsPage) },
       { path: 'analytics', title: 'Analytics · CQ Pulse', loadComponent: () => import('./features/analytics/analytics.page').then(m => m.AnalyticsPage) },
       { path: 'settings', title: 'Settings · CQ Pulse', loadComponent: () => import('./features/settings/settings.page').then(m => m.SettingsPage) },
       { path: '', pathMatch: 'full', redirectTo: 'dashboard' }
