@@ -34,7 +34,7 @@ jobs:
       - name: Test (integration tests use temporary CQPulse_Tests_* databases on the service container)
         env:
           CQPULSE_TEST_SQL: Server=localhost,1433;User Id=sa;Password=${{ env.SQL_SA_PASSWORD }};TrustServerCertificate=True;MultipleActiveResultSets=True
-        run: dotnet test CQPulse.slnx --no-build --configuration Release
+        run: dotnet test CQPulse.slnx --no-build --configuration Release --filter "Category!=Performance"
   frontend:
     runs-on: ubuntu-latest
     defaults:

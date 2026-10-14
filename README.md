@@ -36,7 +36,7 @@ For other hosting setups, serve the client from the same host as the API, or set
 ## Verification
 
 ```powershell
-dotnet test CQPulse.slnx
+dotnet test CQPulse.slnx --filter "Category!=Performance"   # quick run; see docs/performance.md for the opt-in workload measurements
 Set-Location src\CQPulse.Client
 npm run build
 npm test -- --watch=false
