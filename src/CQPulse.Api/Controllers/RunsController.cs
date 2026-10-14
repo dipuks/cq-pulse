@@ -1,3 +1,4 @@
+using CQPulse.Application.Analysis;
 using CQPulse.Application.Catalog;
 using System.Security.Claims;
 using CQPulse.Application.Runs;
@@ -66,12 +67,24 @@ public sealed class RunsController(CQPulseDbContext dbContext, ISimulationServic
 
     [HttpGet("{runId:guid}/results")]
     public async Task<PageResponse<RunResultDto>> GetResults(
-        Guid runId, TestOutcome? outcome, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default)
+        Guid runId, TestOutcome? outcome, string? signature, int page = 1, int pageSize = 50, CancellationToken cancellationToken = default)
     {
         var normalizedPage = ProjectsController.NormalizePage(page);
         var normalizedSize = ProjectsController.NormalizePageSize(pageSize);
         var query = dbContext.TestCaseResults.AsNoTracking().Where(x => x.TestRunId == runId);
         if (outcome is not null) query = query.Where(x => x.Outcome == outcome);
+        if (!string.IsNullOrWhiteSpace(signature))
+        {
+            // Signatures are computed from (category, normalized message), so resolve them to the run's raw message variants.
+            var variants = await dbContext.TestCaseResults.AsNoTracking()
+                .Where(x => x.TestRunId == runId && x.Outcome == TestOutcome.Failed)
+                .Select(x => new { x.FailureCategory, x.ErrorMessage }).Distinct().ToListAsync(cancellationToken);
+            var matches = variants.Where(v => FailureSignature.Compute(v.FailureCategory, v.ErrorMessage) == signature.Trim()).ToList();
+            if (matches.Count == 0) return new PageResponse<RunResultDto>([], 0, normalizedPage, normalizedSize);
+            var category = matches[0].FailureCategory;
+            var messages = matches.Select(m => m.ErrorMessage).ToList();
+            query = query.Where(x => x.Outcome == TestOutcome.Failed && x.FailureCategory == category && messages.Contains(x.ErrorMessage));
+        }
         var total = await query.CountAsync(cancellationToken);
         var items = await query.OrderByDescending(x => x.CompletedAtUtc).ThenBy(x => x.Id)
             .Skip((normalizedPage - 1) * normalizedSize).Take(normalizedSize)

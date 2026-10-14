@@ -99,10 +99,13 @@ public sealed class FakeLogTriageHandler : HttpMessageHandler
                     confidence = 82, // LTA reports a 0–100 heuristic signal score
                     findingsTruncated = false,
                     statistics = new { totalLines = lines.Length, errorLikeLines = errors, uniqueCategories = 1, topCategory = "Timeout" },
-                    findings = lines.Select((l, i) => (l, i)).Where(x => x.l.Contains("\"level\":\"ERROR\"")).Take(3).Select(x => new
+                    // Like the real service: one finding per actionable line (capped at 500), severity from keywords.
+                    findings = lines.Select((l, i) => (l, i)).Where(x => x.l.Contains("\"level\":\"ERROR\"")).Take(500).Select(x => new
                     {
                         lineNumber = x.i + 1, endLineNumber = x.i + 1, timestamp = (string?)null,
-                        message = "Test failed", severity = "HIGH", category = "Timeout",
+                        message = "Test failed",
+                        severity = x.l.Contains("ApiError") ? "CRITICAL" : x.l.Contains("Timeout") ? "HIGH" : "MEDIUM",
+                        category = x.l.Contains("ApiError") ? "Network" : x.l.Contains("Timeout") ? "Timeout" : "General",
                         evidence = x.l.Length > 120 ? x.l[..120] : x.l, suggestion = "Check downstream latency and timeouts."
                     }),
                     recommendations = new[] { "Check downstream latency and timeouts." }

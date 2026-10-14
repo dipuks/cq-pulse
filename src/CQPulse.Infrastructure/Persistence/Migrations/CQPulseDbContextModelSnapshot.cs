@@ -22,6 +22,84 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("CQPulse.Domain.Entities.DecisionEvaluation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("EvidenceJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EvidenceNotesJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ExternalEvaluationId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid?>("FailureAnalysisId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<int>("OptionCount")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Question")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("RequestJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("RequestedAtUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RequestedByUserId")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TestRunId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("TestRunId", "RequestedAtUtc");
+
+                    b.ToTable("DecisionEvaluations", (string)null);
+                });
+
             modelBuilder.Entity("CQPulse.Domain.Entities.ExecutionLog", b =>
                 {
                     b.Property<Guid>("Id")
@@ -118,6 +196,9 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
 
                     b.Property<double?>("SignalScore")
                         .HasColumnType("float");
+
+                    b.Property<string>("SignatureSeveritiesJson")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset?>("StartedAtUtc")
                         .HasColumnType("datetimeoffset");
@@ -581,6 +662,17 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("CQPulse.Domain.Entities.DecisionEvaluation", b =>
+                {
+                    b.HasOne("CQPulse.Domain.Entities.TestRun", "TestRun")
+                        .WithMany()
+                        .HasForeignKey("TestRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("TestRun");
                 });
 
             modelBuilder.Entity("CQPulse.Domain.Entities.ExecutionLog", b =>

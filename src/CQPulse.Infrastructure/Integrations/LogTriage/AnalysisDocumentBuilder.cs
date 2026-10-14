@@ -8,7 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CQPulse.Infrastructure.Integrations.LogTriage;
 
-internal sealed record AnalysisDocument(string Content, string Digest, int FailureCount, bool Truncated, string FileName);
+/// <summary>The submitted document. <c>LineSignatures[i]</c> is the failure signature on line i + 1 (lines are 1-based).</summary>
+internal sealed record AnalysisDocument(
+    string Content, string Digest, int FailureCount, bool Truncated, string FileName, IReadOnlyList<string> LineSignatures);
 
 /// <summary>
 /// Builds the JSONL document submitted for analysis from a run's persisted failed results (oldest first), one line per
@@ -36,16 +38,18 @@ internal static class AnalysisDocumentBuilder
 
         var builder = new StringBuilder();
         var included = 0;
+        var lineSignatures = new List<string>();
         var bytes = 0;
         var truncated = failures.Count > options.MaxFailures;
         foreach (var failure in failures.Take(options.MaxFailures))
         {
+            var signature = FailureSignature.Compute(failure.FailureCategory, failure.ErrorMessage);
             var line = JsonSerializer.Serialize(new
             {
                 timestamp = failure.CompletedAtUtc, level = "ERROR", source = "CQPulse.Simulator",
                 message = $"Test '{failure.TestCaseNameSnapshot}' failed: {failure.ErrorMessage ?? "no error message"}",
                 category = failure.FailureCategory?.ToString(),
-                signature = FailureSignature.Compute(failure.FailureCategory, failure.ErrorMessage),
+                signature,
                 runId = run.Id, resultId = failure.Id, testCaseId = failure.TestCaseId, durationMs = failure.DurationMs
             }, Json);
             var lineBytes = Encoding.UTF8.GetByteCount(line) + 1;
@@ -56,11 +60,12 @@ internal static class AnalysisDocumentBuilder
             }
             builder.Append(line).Append('\n');
             bytes += lineBytes;
+            lineSignatures.Add(signature);
             included++;
         }
 
         var content = builder.ToString();
         var digest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-        return new AnalysisDocument(content, digest, included, truncated, $"cqpulse-run-{run.Id:N}.jsonl");
+        return new AnalysisDocument(content, digest, included, truncated, $"cqpulse-run-{run.Id:N}.jsonl", lineSignatures);
     }
 }

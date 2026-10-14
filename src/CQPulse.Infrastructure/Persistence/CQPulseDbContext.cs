@@ -18,6 +18,7 @@ public sealed class CQPulseDbContext(DbContextOptions<CQPulseDbContext> options)
     public DbSet<TestCaseResult> TestCaseResults => Set<TestCaseResult>();
     public DbSet<ExecutionLog> ExecutionLogs => Set<ExecutionLog>();
     public DbSet<FailureAnalysis> FailureAnalyses => Set<FailureAnalysis>();
+    public DbSet<DecisionEvaluation> DecisionEvaluations => Set<DecisionEvaluation>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -102,9 +103,29 @@ public sealed class CQPulseDbContext(DbContextOptions<CQPulseDbContext> options)
             entity.Property(x => x.TopCategory).HasMaxLength(100);
             entity.Property(x => x.FindingsJson).HasColumnType("nvarchar(max)");
             entity.Property(x => x.RecommendationsJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.SignatureSeveritiesJson).HasColumnType("nvarchar(max)");
             entity.HasIndex(x => new { x.TestRunId, x.RequestedAtUtc });
             entity.HasIndex(x => x.Status);
             // Analyses are derived data: deleting a run removes its analyses.
+            entity.HasOne(x => x.TestRun).WithMany().HasForeignKey(x => x.TestRunId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<DecisionEvaluation>(entity =>
+        {
+            entity.ToTable("DecisionEvaluations");
+            entity.Property(x => x.Provider).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.CorrelationId).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.RequestedByUserId).HasMaxLength(450);
+            entity.Property(x => x.Question).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.RequestJson).HasColumnType("nvarchar(max)").IsRequired();
+            entity.Property(x => x.EvidenceJson).HasColumnType("nvarchar(max)").IsRequired();
+            entity.Property(x => x.EvidenceNotesJson).HasColumnType("nvarchar(max)").IsRequired();
+            entity.Property(x => x.ExternalEvaluationId).HasMaxLength(64);
+            entity.Property(x => x.ResultJson).HasColumnType("nvarchar(max)");
+            entity.Property(x => x.LastError).HasMaxLength(2_000);
+            entity.HasIndex(x => new { x.TestRunId, x.RequestedAtUtc });
+            entity.HasIndex(x => x.ProjectId);
+            // Evaluations are derived data: deleting a run removes them.
             entity.HasOne(x => x.TestRun).WithMany().HasForeignKey(x => x.TestRunId).OnDelete(DeleteBehavior.Cascade);
         });
 

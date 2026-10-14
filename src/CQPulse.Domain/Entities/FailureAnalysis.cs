@@ -30,6 +30,11 @@ public sealed class FailureAnalysis
     public string? TopCategory { get; private set; }
     public string? FindingsJson { get; private set; }
     public string? RecommendationsJson { get; private set; }
+    /// <summary>
+    /// Highest provider severity per CQ Pulse failure signature (JSON object signature → severity), mapped from every
+    /// finding returned by the provider through the submitted line numbers. Null for analyses created before this existed.
+    /// </summary>
+    public string? SignatureSeveritiesJson { get; private set; }
     public TestRun TestRun { get; set; } = null!;
 
     public void Start(DateTimeOffset now)
@@ -53,6 +58,7 @@ public sealed class FailureAnalysis
         TopCategory = outcome.TopCategory;
         FindingsJson = outcome.FindingsJson;
         RecommendationsJson = outcome.RecommendationsJson;
+        SignatureSeveritiesJson = outcome.SignatureSeveritiesJson;
     }
 
     /// <param name="status"><see cref="AnalysisStatus.Failed"/> (bad request/response) or <see cref="AnalysisStatus.Unavailable"/> (service down, timeout).</param>
@@ -79,4 +85,4 @@ public sealed class FailureAnalysis
 
 public sealed record AnalysisOutcome(
     string? ExternalId, string Severity, string Summary, double? SignalScore, string? TopCategory,
-    string FindingsJson, string RecommendationsJson);
+    string FindingsJson, string RecommendationsJson, string? SignatureSeveritiesJson = null);

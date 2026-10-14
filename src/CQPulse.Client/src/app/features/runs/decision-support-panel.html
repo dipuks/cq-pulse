@@ -1,0 +1,109 @@
+<section class="panel" aria-live="polite">
+  <div class="panel-title">
+    <div>
+      <p class="eyebrow">DECISION SUPPORT · SMARTDOG</p>
+      <h2>What to investigate first</h2>
+    </div>
+  </div>
+
+  @if (canEvaluate()) {
+    <form class="filters" (ngSubmit)="evaluate()" aria-label="Ranking criteria">
+      @for (w of weights(); track w.id) {
+        <label>{{ w.label }} weight
+          <input type="number" min="0.01" max="1000" step="0.05" [(ngModel)]="w.value" [name]="'weight-' + w.id" [attr.name]="'weight-' + w.id">
+        </label>
+      }
+      <label>Minimum occurrences<input type="number" min="1" step="1" [(ngModel)]="minimumOccurrences" name="minimumOccurrences"></label>
+      <button type="submit" class="secondary" [disabled]="busy()">{{ busy() ? 'Ranking…' : 'Rank failure signatures' }}</button>
+      <button type="button" class="secondary" (click)="resetWeights()">Reset</button>
+    </form>
+    <p class="empty"><small>Weights are relative (SmartDog normalizes them). Triage severity is used only when a matching LogTriageAssistant analysis covers every signature; otherwise it is left out and the reason is shown.</small></p>
+  } @else if (loaded()) {
+    <p class="empty">{{ failedCount() === 0 ? 'This run has no failed results to rank.' : 'Available once the run has finished.' }}</p>
+  }
+  @if (error()) { <p class="error" role="alert">{{ error() }}</p> }
+
+  @if (selected(); as e) {
+    <p>
+      <span class="status" [attr.data-status]="statusBadge(e.status)">{{ e.status }}</span>
+      <span class="empty"> · {{ e.requestedAtUtc | date: 'medium' }} · {{ e.evidence.length }} signatures · correlation {{ e.correlationId }}</span>
+    </p>
+    @if (e.lastError) {
+      <p class="error" role="alert">{{ e.lastError }}</p>
+      <p class="empty">No ranking was produced. The evidence that would have been submitted is listed below; submit again when SmartDog is available.</p>
+    }
+
+    @if (e.result; as r) {
+      @if (r.status === 'NoFeasibleOption') {
+        <p class="error">No signature met the minimum of {{ e.minimumOccurrences }} occurrences, so nothing was ranked.</p>
+      }
+      @for (option of r.ranking; track option.optionId) {
+        <div class="log">
+          <div class="row">
+            <strong>#{{ option.rank }} {{ option.name }}</strong>
+            <span class="status">score {{ option.score | number: '1.3-3' }}</span>
+            @if (evidenceFor(e, option.optionId); as ev) {
+              <a [routerLink]="['/runs', e.testRunId]" [queryParams]="{ signature: ev.signature }" fragment="results">{{ ev.occurrencesInRun }} failed tests →</a>
+            }
+          </div>
+          <div class="progress" aria-hidden="true"><span [style.width.%]="option.score * 100"></span></div>
+          <small>{{ option.explanation }}</small>
+          <details>
+            <summary>Score breakdown</summary>
+            <div class="table-row heading"><span>Criterion</span><span>Value</span><span>Normalized × weight</span><span>Contribution</span></div>
+            @for (c of option.contributions; track c.criterionId) {
+              <div class="table-row">
+                <span>{{ criterionName(e, c.criterionId) }}</span>
+                <span>{{ c.criterionId === 'triageSeverity' ? (evidenceFor(e, option.optionId)?.triageSeverity ?? c.rawValue) : (c.rawValue | number) }}</span>
+                <span>{{ c.normalizedValue | number: '1.2-2' }} × {{ c.normalizedWeight | number: '1.2-2' }}</span>
+                <span>{{ c.contribution | number: '1.3-3' }}</span>
+              </div>
+            }
+          </details>
+        </div>
+      }
+      @for (x of r.infeasible; track x.optionId) {
+        <p class="empty"><small>Not ranked: {{ x.name }} — {{ x.violations.join(' ') }}</small></p>
+      }
+      @if (r.notes.length) {
+        <h3>SmartDog notes</h3>
+        <ul>@for (n of r.notes; track $index) { <li>{{ n }}</li> }</ul>
+      }
+      <p class="empty"><small>{{ r.method }} {{ r.limitations }} SmartDog evaluation {{ e.externalEvaluationId }}.</small></p>
+    }
+
+    <details>
+      <summary>Evidence submitted ({{ e.criteria.length }} criteria)</summary>
+      <dl class="definition-list">
+        @for (c of e.criteria; track c.id) { <dt>{{ c.name }} (weight {{ c.weight }})</dt><dd>{{ c.source }}</dd> }
+      </dl>
+      <div class="table-row heading"><span>Signature</span><span>In run / 30 days</span><span>Test cases</span><span>Triage severity</span></div>
+      @for (ev of e.evidence; track ev.optionId) {
+        <div class="table-row">
+          <strong>{{ ev.category ?? 'Uncategorized' }}<small>{{ ev.normalizedMessage }} · {{ ev.signature }}</small></strong>
+          <span>{{ ev.occurrencesInRun | number }} / {{ ev.recurrence30Days | number }}</span>
+          <span>{{ ev.affectedTestCases | number }}</span>
+          <span>{{ ev.triageSeverity ?? 'not used' }}</span>
+        </div>
+      }
+    </details>
+    @if (e.evidenceNotes.length) {
+      <ul class="empty">@for (n of e.evidenceNotes; track $index) { <li><small>{{ n }}</small></li> }</ul>
+    }
+  } @else if (loaded() && canEvaluate()) {
+    <p class="empty">No rankings yet. Rank the failure signatures to see a SmartDog recommendation with its explanation.</p>
+  }
+
+  @if (history().length > 1) {
+    <details>
+      <summary>History ({{ history().length }})</summary>
+      @for (h of history(); track h.id) {
+        <div class="row">
+          <button type="button" class="secondary" (click)="selectedId.set(h.id)" [attr.aria-pressed]="selected()?.id === h.id">{{ h.requestedAtUtc | date: 'medium' }}</button>
+          <span class="status" [attr.data-status]="statusBadge(h.status)">{{ h.status }}</span>
+          <span>{{ h.result?.ranking?.[0]?.name ?? h.lastError ?? '—' }}</span>
+        </div>
+      }
+    </details>
+  }
+</section>

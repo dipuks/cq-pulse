@@ -1,5 +1,5 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, OnInit, inject, input, signal } from '@angular/core';
+import { Component, OnInit, effect, inject, input, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
@@ -9,9 +9,10 @@ import { DataState } from '../../shared/data-state';
 import { loadable } from '../../shared/loadable';
 import { Pager } from '../../shared/pager';
 import { FailureTriagePanel } from './failure-triage-panel';
+import { DecisionSupportPanel } from './decision-support-panel';
 
 @Component({
-  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, DataState, Pager, FailureTriagePanel],
+  imports: [FormsModule, RouterLink, DatePipe, DecimalPipe, DataState, Pager, FailureTriagePanel, DecisionSupportPanel],
   template: `
     <section class="page-heading">
       <div>
@@ -62,8 +63,13 @@ import { FailureTriagePanel } from './failure-triage-panel';
         <details><summary>Submitted configuration</summary><pre class="config">{{ formatConfig(r.configurationSnapshot) }}</pre></details>
       </section>
       <app-failure-triage [runId]="r.id" [runFinished]="isTerminal(r.status)" [failedCount]="r.failedCount" />
+      <app-decision-support [runId]="r.id" [runFinished]="isTerminal(r.status)" [failedCount]="r.failedCount" />
     }
-    <section class="panel">
+    <section class="panel" id="results">
+      @if (signatureFilter()) {
+        <p class="empty" role="status">Showing failed tests with failure signature <code>{{ signatureFilter() }}</code>.
+          <button type="button" class="secondary" (click)="clearSignature()">Show all results</button></p>
+      }
       <div class="panel-title">
         <div><p class="eyebrow">RESULTS</p><h2>Individual tests</h2></div>
         <select [(ngModel)]="outcome" (ngModelChange)="filterResults()" aria-label="Outcome filter">
@@ -106,14 +112,33 @@ export class RunDetailPage implements OnInit {
   private readonly router = inject(Router);
   protected readonly actionError = signal('');
   protected readonly run = loadable(() => this.api.run(this.runId()));
-  protected readonly results = loadable(() =>
-    this.api.results(this.runId(), { outcome: this.outcome, page: this.resultsPage, pageSize: this.resultsPageSize }));
+  /** Optional ?signature= query parameter (from a decision-support option): shows only that signature's failures. */
+  readonly signature = input<string>();
+  protected readonly signatureFilter = signal('');
+  protected readonly results = loadable(() => this.api.results(this.runId(), {
+    outcome: this.outcome, signature: this.signatureFilter(), page: this.resultsPage, pageSize: this.resultsPageSize
+  }));
   protected readonly logs = loadable(() => this.api.logs(this.runId()));
+
+  constructor() {
+    // Runs on first render and whenever the query parameter changes (the page component is reused).
+    effect(() => {
+      const signature = this.signature() ?? '';
+      untracked(() => {
+        this.signatureFilter.set(signature);
+        this.resultsPage = 1;
+        this.results.reload();
+      });
+    });
+  }
 
   ngOnInit(): void {
     this.run.reload();
-    this.results.reload();
     this.logs.reload();
+  }
+
+  protected clearSignature(): void {
+    void this.router.navigate(['/runs', this.runId()]);
   }
 
   protected filterResults(): void {

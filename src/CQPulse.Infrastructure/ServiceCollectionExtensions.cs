@@ -3,6 +3,7 @@ using CQPulse.Application.Simulation;
 using CQPulse.Infrastructure.Identity;
 using CQPulse.Infrastructure.Catalog;
 using CQPulse.Infrastructure.Integrations.LogTriage;
+using CQPulse.Infrastructure.Integrations.SmartDog;
 using Microsoft.Extensions.Http.Resilience;
 using CQPulse.Infrastructure.Persistence;
 using CQPulse.Infrastructure.Simulator;
@@ -39,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddHostedService<ExecutionRecoveryService>();
         services.AddHostedService<SimulationWorker>();
         AddLogTriageIntegration(services, configuration);
+        AddSmartDogIntegration(services, configuration);
         services.AddScoped<CQPulse.Infrastructure.Integrations.IIntegrationStatusService, CQPulse.Infrastructure.Integrations.IntegrationStatusService>();
         services.AddIdentityCore<ApplicationUser>(options =>
             {
@@ -56,6 +58,32 @@ public static class ServiceCollectionExtensions
             .AddEntityFrameworkStores<CQPulseDbContext>();
 
         return services;
+    }
+
+    private static void AddSmartDogIntegration(IServiceCollection services, IConfiguration configuration)
+    {
+        var settings = configuration.GetSection(SmartDogOptions.SectionName).Get<SmartDogOptions>() ?? new SmartDogOptions();
+        services.AddOptions<SmartDogOptions>().Bind(configuration.GetSection(SmartDogOptions.SectionName));
+        services.AddScoped<CQPulse.Application.Decisions.IDecisionSupportService, DecisionSupportService>();
+
+        var attemptTimeout = TimeSpan.FromSeconds(Math.Max(1, settings.AttemptTimeoutSeconds));
+        services.AddHttpClient<SmartDogClient>(client =>
+            {
+                if (Uri.TryCreate(settings.BaseUrl, UriKind.Absolute, out var baseUrl))
+                    client.BaseAddress = new Uri(baseUrl.ToString().TrimEnd('/') + "/");
+                client.Timeout = Timeout.InfiniteTimeSpan; // the resilience pipeline owns timeouts
+            })
+            // Evaluation is stateless, so retrying transient failures (network, 408, 429, 5xx) cannot duplicate side effects.
+            .AddStandardResilienceHandler(resilience =>
+            {
+                resilience.AttemptTimeout.Timeout = attemptTimeout;
+                resilience.Retry.MaxRetryAttempts = Math.Max(0, settings.RetryCount);
+                resilience.Retry.Delay = TimeSpan.FromMilliseconds(Math.Max(1, settings.RetryBaseDelayMilliseconds));
+                resilience.Retry.UseJitter = true;
+                resilience.TotalRequestTimeout.Timeout = attemptTimeout * (settings.RetryCount + 2);
+                resilience.CircuitBreaker.SamplingDuration = attemptTimeout * 2;
+                resilience.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(15);
+            });
     }
 
     private static void AddLogTriageIntegration(IServiceCollection services, IConfiguration configuration)

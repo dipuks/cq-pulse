@@ -123,3 +123,26 @@ export interface QualityTrend {
   previousResults: number; previousFailed: number; previousFailureRate?: number | null; changePercentagePoints?: number | null;
 }
 export interface QualityTrendReport { window: InsightWindow; projects: QualityTrend[]; predictionStatus: string; }
+
+export interface DecisionSupportRequest { weights?: Record<string, number>; minimumOccurrences?: number; }
+export interface DecisionCriterion { id: string; name: string; weight: number; direction: string; source: string; }
+export interface DecisionOptionEvidence {
+  optionId: string; signature: string; category?: FailureCategory | null; normalizedMessage: string; sampleMessage: string;
+  occurrencesInRun: number; recurrence30Days: number; affectedTestCases: number; triageSeverity?: string | null;
+}
+export interface DecisionContribution { criterionId: string; rawValue: number; normalizedValue: number; normalizedWeight: number; contribution: number; }
+export interface DecisionRankedOption {
+  rank: number; optionId: string; name: string; score: number; contributions: DecisionContribution[]; explanation: string; tiedWithOptionIds: string[];
+}
+export interface DecisionResult {
+  evaluationId?: string | null; status: 'Ranked' | 'NoFeasibleOption' | string; question?: string | null; method: string;
+  criteria: { id: string; name: string; direction: string; weight: number; normalizedWeight: number; minimumValue?: number | null; maximumValue?: number | null }[];
+  ranking: DecisionRankedOption[]; infeasible: { optionId: string; name: string; violations: string[] }[]; notes: string[]; limitations: string;
+}
+/** A recorded SmartDog evaluation: submitted criteria and evidence, plus the result or the reason it failed. */
+export interface DecisionEvaluation {
+  id: string; testRunId: string; provider: string; status: AnalysisStatus; requestedAtUtc: string; completedAtUtc?: string | null;
+  correlationId: string; question: string; criteria: DecisionCriterion[]; minimumOccurrences?: number | null;
+  evidence: DecisionOptionEvidence[]; evidenceNotes: string[]; failureAnalysisId?: string | null; externalEvaluationId?: string | null;
+  result?: DecisionResult | null; lastError?: string | null;
+}

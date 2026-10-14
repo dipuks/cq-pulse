@@ -168,15 +168,7 @@ public sealed class InsightsController(CQPulseDbContext dbContext) : ControllerB
                 g.Min(x => x.CompletedAtUtc), g.Max(x => x.CompletedAtUtc)))
             .ToListAsync(cancellationToken);
 
-    /// <summary>Last <paramref name="days"/> whole UTC days including today, plus the preceding window of equal length.</summary>
-    internal static InsightWindow Window(int days)
-    {
-        days = Math.Clamp(days, 1, 365);
-        var today = DateTimeOffset.UtcNow.UtcDateTime.Date;
-        var to = new DateTimeOffset(today.AddDays(1), TimeSpan.Zero);
-        var from = to.AddDays(-days);
-        return new InsightWindow(from, to, from.AddDays(-days));
-    }
+    private static InsightWindow Window(int days) => InsightWindows.LastDays(days, DateTimeOffset.UtcNow);
 
     private sealed record MessageGroup(
         FailureCategory? Category, string? Message, int Count, int Runs, int TestCases, DateTimeOffset FirstSeen, DateTimeOffset LastSeen);

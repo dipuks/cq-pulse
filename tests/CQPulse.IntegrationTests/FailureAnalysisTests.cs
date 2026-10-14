@@ -142,7 +142,7 @@ public sealed class FailureAnalysisTests(ApiFixture fixture)
         Assert.Equal(AnalysisStatus.Unavailable, analysis.Status);
         Assert.Contains("not configured", analysis.LastError);
         Assert.Equal("NotConfigured", status.Single(x => x.Name == "LogTriageAssistant").Status);
-        Assert.Equal("NotIntegrated", status.Single(x => x.Name == "SmartDog").Status);
+        Assert.Equal("NotConfigured", status.Single(x => x.Name == "SmartDog").Status);
     }
 
     [Fact]

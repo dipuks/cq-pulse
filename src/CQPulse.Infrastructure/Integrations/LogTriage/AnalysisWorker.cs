@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CQPulse.Application.Analysis;
+using CQPulse.Application.Decisions;
 using CQPulse.Domain;
 using CQPulse.Domain.Entities;
 using CQPulse.Infrastructure.Persistence;
@@ -78,7 +79,8 @@ internal sealed class AnalysisWorker(
                 f.Category ?? "General", f.Evidence ?? string.Empty, f.Suggestion ?? string.Empty)).ToList();
             analysis.Succeed(DateTimeOffset.UtcNow, new AnalysisOutcome(
                 result.Id, result.Severity!, result.Summary!, result.Confidence, result.Statistics?.TopCategory,
-                JsonSerializer.Serialize(findings, Json), JsonSerializer.Serialize(result.Recommendations ?? [], Json)));
+                JsonSerializer.Serialize(findings, Json), JsonSerializer.Serialize(result.Recommendations ?? [], Json),
+                JsonSerializer.Serialize(SeveritiesBySignature(result.Findings ?? [], document.LineSignatures), Json)));
             logger.LogInformation("Failure analysis {AnalysisId} succeeded: severity {Severity}, {Findings} findings.",
                 analysis.Id, result.Severity, findings.Count);
         }
@@ -126,6 +128,27 @@ internal sealed class AnalysisWorker(
         {
             logger.LogError(exception, "Could not record failure of analysis {AnalysisId}.", analysisId);
         }
+    }
+
+    /// <summary>
+    /// Highest severity per failure signature, from every returned finding (not only the stored ones). A finding covers
+    /// lines LineNumber..EndLineNumber of the submitted document; findings outside it or with unknown labels are ignored.
+    /// </summary>
+    internal static Dictionary<string, string> SeveritiesBySignature(IEnumerable<LogTriageFinding> findings, IReadOnlyList<string> lineSignatures)
+    {
+        var highest = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var finding in findings)
+        {
+            if (SeverityScale.Rank(finding.Severity) is not { } rank) continue;
+            var first = Math.Max(1, finding.LineNumber);
+            var last = Math.Min(lineSignatures.Count, Math.Max(finding.LineNumber, finding.EndLineNumber));
+            for (var line = first; line <= last; line++)
+            {
+                var signature = lineSignatures[line - 1];
+                highest[signature] = Math.Max(highest.GetValueOrDefault(signature), rank);
+            }
+        }
+        return highest.ToDictionary(x => x.Key, x => SeverityScale.Label(x.Value), StringComparer.Ordinal);
     }
 
     private static string Truncate(string text) => text.Length <= MaxErrorLength ? text : text[..MaxErrorLength];
