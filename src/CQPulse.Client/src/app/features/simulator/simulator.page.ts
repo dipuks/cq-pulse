@@ -18,6 +18,17 @@ export const defaultRequest = (): SimulationRequest => ({
   randomSeed: null, runLabel: 'Simulator run', workloadSource: 'Catalog'
 });
 
+/**
+ * Merges a REST snapshot into the displayed run. REST counts persisted results (written in batches) while live events count
+ * executed tests, so during a run the live progress is usually ahead: keep it rather than moving the bar backwards.
+ * A terminal snapshot is authoritative.
+ */
+export function mergeRunSnapshot(current: RunDetail | null, snapshot: RunDetail): RunDetail {
+  if (!current || current.id !== snapshot.id || isTerminal(snapshot.status) || current.completedTests <= snapshot.completedTests) return snapshot;
+  const { completedTests, passedCount, failedCount, skippedCount } = current;
+  return { ...snapshot, completedTests, passedCount, failedCount, skippedCount };
+}
+
 /** Client-side checks mirroring the server validator, using the limits the API reports. */
 export function validateRequest(request: SimulationRequest, limits: SimulatorLimits | null): string[] {
   const errors: string[] = [];
@@ -166,7 +177,7 @@ export class SimulatorPage implements OnInit, OnDestroy {
     this.refreshSubscription?.unsubscribe();
     this.refreshSubscription = this.api.run(runId).subscribe({
       next: run => {
-        this.activeRun.set(run);
+        this.activeRun.set(mergeRunSnapshot(this.activeRun(), run));
         if (isTerminal(run.status)) this.finish();
       },
       error: e => this.actionError.set(problemMessage(e, 'Run status could not be refreshed.'))

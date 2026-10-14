@@ -87,7 +87,7 @@ internal sealed class SmartDogClient(HttpClient http, IOptions<SmartDogOptions> 
         }
         catch (Exception exception) when (IsTransport(exception, cancellationToken) || exception is TaskCanceledException)
         {
-            return (false, $"Unreachable: {exception.GetBaseException().Message}");
+            return (false, ProbeDetail.Unreachable(exception));
         }
     }
 

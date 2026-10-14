@@ -142,10 +142,10 @@ npm start   # src\CQPulse.Client
 | M2 test harness | `tests/CQPulse.IntegrationTests/Infrastructure/*`; temporary `CQPulse_Tests_<guid>` databases |
 | M3 backend reliability | `ApiExceptionHandler`, `SimulationWorkload`, `SimulatorOptions`, worker failure paths; `ErrorMappingTests`, `SimulatorExecutionTests` |
 | M4 real-time/client reliability | SignalR JSON enum + CORS credentials; `core/auth.ts` interceptor/guard; `DataState`; `RealtimeTests` |
-| M5 concurrency/hardening | Migration `20261014023133_AddRunConcurrencyAndActiveRunIndex` (**created, not applied to the dev DB**); `ConcurrencyAndHardeningTests` |
+| M5 concurrency/hardening | Migration `20261014023133_AddRunConcurrencyAndActiveRunIndex` (applied to the dev DB on 2026-10-14 after a verified backup); `ConcurrencyAndHardeningTests` |
 | M6 client restructure | `core/`, `shared/`, `layout/`, `features/*` lazy routes |
 
-### Remaining, in dependency order
+### Remaining on 2026-10-13, in dependency order (all since completed; see below)
 
 | Phase | Scope (from plan Phase 3 items 3.1–3.9, Phase 4, Phase 5 and the Quality Intelligence brief) | Depends on |
 |---|---|---|
@@ -158,3 +158,16 @@ npm start   # src\CQPulse.Client
 | **M9 Release readiness** | CI (verified on GitHub once pushing is approved), README for all three projects, docs, security review, final audit | All |
 
 Design and contracts: [quality-intelligence-architecture.md](quality-intelligence-architecture.md).
+
+## Status on 2026-10-14: all phases complete
+
+| Phase | Commit | Notes |
+|---|---|---|
+| Q1 Environment | — | All four pending migrations applied to the development database after backups, a rehearsal on a restored copy, and checksum verification (`feature-audit.md`) |
+| M7 Product workflows | `b807e56` | |
+| M8 Performance | `62c8f82` | Re-measured on 2026-10-14 ([performance.md](performance.md)) |
+| Q2 LogTriage integration | `60ea966` | LogTriageAssistant itself unchanged |
+| Q3 Historical intelligence | `c98cc0e` | |
+| M9 Documentation | `90d91ea` | GitHub CI passed for this commit (backend on a SQL Server container, frontend) |
+| Q4 SmartDog integration | SmartDog `f377a89` (baseline), `af04474`; CQ Pulse `7993db7` | Structured evaluation API in SmartDog; evidence, history and run-page panel in CQ Pulse |
+| Release verification | this commit | Real end-to-end, offline, browser and performance verification; fixes found during it; secrets scan; documentation (`feature-audit.md`) |

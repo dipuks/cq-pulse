@@ -43,3 +43,12 @@ internal sealed class IntegrationStatusService(
     private static IntegrationStatusDto NotConfigured(string name, string detail) =>
         new(name, false, "NotConfigured", detail, null, DateTimeOffset.UtcNow);
 }
+
+internal static class ProbeDetail
+{
+    /// <summary>Status-check detail for a failed probe. Timeouts surface as cancellations whose own message ("A task was canceled.") says nothing.</summary>
+    public static string Unreachable(Exception exception) =>
+        exception is OperationCanceledException or TimeoutException or Polly.Timeout.TimeoutRejectedException
+            ? "Unreachable: timed out waiting for a response."
+            : $"Unreachable: {exception.GetBaseException().Message}";
+}

@@ -19,6 +19,8 @@ public sealed class FakeSmartDogHandler : HttpMessageHandler
 
     public Mode Behavior { get; set; } = Mode.Healthy;
     public bool Ready { get; set; } = true;
+    /// <summary>Delays /health responses, e.g. to exercise status-check timeouts.</summary>
+    public TimeSpan HealthDelay { get; set; } = TimeSpan.Zero;
     public int EvaluateCalls;
     public ConcurrentQueue<(JsonElement Body, string? ApiKey, string? CorrelationId)> Requests { get; } = new();
 
@@ -26,7 +28,10 @@ public sealed class FakeSmartDogHandler : HttpMessageHandler
     {
         var path = request.RequestUri!.AbsolutePath.TrimStart('/');
         if (request.Method == HttpMethod.Get && path == "health")
+        {
+            await Task.Delay(HealthDelay, cancellationToken);
             return new HttpResponseMessage(Ready ? HttpStatusCode.OK : HttpStatusCode.ServiceUnavailable);
+        }
         if (request.Method != HttpMethod.Post || path != "api/decisions/evaluate")
             return new HttpResponseMessage(HttpStatusCode.NotFound);
 

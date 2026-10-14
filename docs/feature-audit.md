@@ -312,3 +312,105 @@ UI: new **Insights** page (navigation) with project and window filters, flagged 
 |---|---|
 | `dotnet test CQPulse.slnx --filter "Category!=Performance"` | ✅ Unit 66/66, Integration 84/84 |
 | `npx ng build` / `npx ng test --watch=false` | ✅ / ✅ 41/41 |
+
+### Q4 — SmartDog decision support (2026-10-14)
+
+**SmartDog** (separate repository, `git init` for this work): `f377a89` is a baseline snapshot of the existing code, excluding build output, databases and local secrets. `af04474` adds `POST /api/decisions/evaluate`: a deterministic weighted ranking with per-criterion contributions and explanations, hard constraints, `X-Api-Key` authentication (SHA-256 digests compared in constant time, fail-closed with 503 when no key is configured), correlation ids and `/health`. The conversational endpoints are unchanged. 49 tests (36 evaluator, 13 API).
+
+**CQ Pulse** `7993db7`:
+
+| Concern | Implementation | Evidence |
+|---|---|---|
+| Evidence | Four criteria from persisted data: occurrences in the run, 30-day project recurrence, affected catalog test cases, LTA triage severity (highest finding severity per signature, stored with the analysis). The rules are in `quality-intelligence-architecture.md` §6 | `DecisionSupportTests` (16), `SeverityMappingTests` |
+| Missing evidence | Severity is left out for all options, with the reason, unless the latest successful analysis matches the run's current failure data and covers every signature; never zero-filled | Tests: no analysis, stale digest, incomplete coverage, truncated analysis |
+| Failures | Not configured / down / timeout → `Unavailable`; rejected key, 400, malformed response → `Failed`; error stored, no ranking shown | Fake modes ServerError, Unauthorized, BadRequest, Malformed, Slow |
+| History | Every request is stored (request JSON, evidence, notes, result or error, correlation id); newest 50 per run | History test |
+| UI | Run detail → Decision support: weights, minimum occurrences, ranking with score bars, breakdown, SmartDog notes/method/limitations, evidence, history, links to `/runs/{id}?signature=…#results` | `decision-support-panel.spec` (5), `run-detail.page.spec` (2) |
+| Status | `GET /api/integrations/status` checks SmartDog `/health` | Status test |
+
+**Migration `20261014131810_AddDecisionEvaluations`:**
+
+| Step | Result |
+|---|---|
+| SQL inspected (`dotnet ef migrations script`) | Additive only: adds nullable `FailureAnalyses.SignatureSeveritiesJson nvarchar(max)` and creates `DecisionEvaluations` (FK → `TestRuns` with cascade delete, 2 indexes). No existing column is altered or dropped |
+| Target verified | `.\SQLEXPRESS`, database `CQPulse` |
+| Backup | `CQPulse_before_AddDecisionEvaluations_20261014T132732Z.bak` (with checksum); `RESTORE VERIFYONLY` passed |
+| Rehearsal | Backup restored to a `CQPulse_Tests_<guid>` copy; migration applied there first; data fingerprint unchanged |
+| Applied to development | 5 migrations in `__EFMigrationsHistory`; 18 columns in `DecisionEvaluations`, severity column present, cascade FK, both indexes, filtered active-run index still present |
+| Data | Fingerprint identical before and after: `3 1 2 26 24125 0 0 1 -944826009 782910834 -539428645 1327653973` (counts of projects, suites, cases, runs, results, logs, analyses, users; checksums of runs, results, projects, cases). Re-checked identical at the end of the release verification |
+
+The earlier migrations (`AddRunConcurrencyAndActiveRunIndex`, `AddRunRerunLink`, `AddFailureAnalyses`) were applied the same way from `CQPulse_before_M5_M7_Q2_migrations_20261014T041852Z.bak`, after a test restore of that backup.
+
+### Release verification (2026-10-14)
+
+**Environment.** All processes ran on the developer machine with these services:
+
+- LogTriageAssistant: built from its current working tree into a scratch folder and run with `Storage__DatabasePath` pointing at a scratch SQLite file, using a dedicated service account. LTA's own `App_Data/logtriage.db` and tree were not touched.
+- SmartDog: scratch build, with its API key passed from a scratch file through an environment variable.
+- CQ Pulse API: Debug build, against the rehearsal copy (development data plus all 5 migrations).
+- Angular dev server: `proxy.conf.json` on port 4300.
+
+Checks ran as Node scripts through the dev proxy, and as browser checks in headless Microsoft Edge driven over the DevTools protocol. The rehearsal copy, scratch secrets, the scratch LTA database and the browser profiles were deleted afterwards.
+
+| Area | Check | Result |
+|---|---|---|
+| Existing data | Dashboard, analytics, run history on the migrated copy | 26 runs, 19,281/3,699/1,145, 24,125 results, as before migration; insights endpoints 200 |
+| Proxy | `/health`, `/health/ready`, anonymous `/api/runs`, deep link | 200, 200, 401, 200; invalid bearer token → 401 |
+| Real time | SignalR over WebSockets through the proxy, 500-test catalog run | 102 progress messages with string statuses; final message equals the persisted run; counters equal the preview (220/160/120) |
+| Real time | 5,000-test run, REST polled every 40 ms | REST advanced mid-run in persisted steps of 500 (one batch); passed + failed + skipped = completed in every sample; SignalR monotonic, 102 messages |
+| LTA | Automatic analysis; repeat request | `Succeeded` (100 stored findings for 160 failures), per-signature severities stored; repeat → 200, same id |
+| SmartDog | Decision on the catalog run (`X-Correlation-ID: e2e-q4-decision-0001`) | `Succeeded`/`Ranked`; correlation id stored and echoed; severity used (note names the analysis); affected test cases 3 per signature |
+| Scoring | Independent recomputation in the script from the submitted evidence | Ranking and every score identical (±1e-5); contributions sum to each score; normalized weights sum to 1.000000 |
+| Links | `GET /runs/{id}/results?signature=…` for each option | 54, 54, 52 = occurrences |
+| Constraint | Minimum occurrences 1,000,000 | `NoFeasibleOption`, all 3 listed as infeasible |
+| Rerun | Rerun of the catalog run | Linked; identical totals |
+| Correlation | Log scopes with `IncludeScopes` | `CorrelationId:e2e-q4-corr-decision-04` in both CQ Pulse and SmartDog logs, same W3C trace id |
+| Largest run | 50,000 tests, then decision support | All 12,500 failures counted across 4 signatures; truncated-analysis note shown; 596 / 242 / 208 ms per request |
+
+**Service-offline checks** (each service stopped and confirmed by its closed port):
+
+| Scenario | Result |
+|---|---|
+| SmartDog down | Decision recorded `Unavailable` ("connection refused"), with evidence and without a result; status Unavailable; a new run completes; LTA analysis still succeeds |
+| SmartDog restored | Decision succeeds again |
+| LTA down | Run completes; analysis `Unavailable`; status Unavailable; decision still ranks, without severity, with the reason in the notes |
+| Both down | 80-test run completes and persists; dashboard works; analysis and decision both `Unavailable`; CQ Pulse `/health/ready` 200 |
+| LTA restored | Retry of the same analysis succeeds on attempt 2 without creating a run; severity used again |
+
+**Browser (headless Edge 2026-10-14, real login form, no console errors or uncaught exceptions in any check):**
+
+| Check | Result |
+|---|---|
+| Simulator live view, 20,000-test catalog run | SignalR connected in 1,643 of 1,645 samples; 80 distinct live values between the 5-second REST checks; progress never moved backwards; final summary `CompletedWithFailures` |
+| Ranking panel | Ranking with scores and explanations, expanded breakdown, notes, method, evidence, history |
+| Signature link | Opens `/runs/{id}?signature=…#results` showing only that signature's 50 failed rows (first page of 54); "Show all results" clears it |
+| Settings | Both integrations Healthy |
+| SmartDog stopped | Panel shows `Unavailable` with the reason and "No ranking was produced"; results still load; Settings shows SmartDog Unavailable |
+
+**Defects found during verification and fixed:**
+
+1. **Live progress moved backwards** every 5 s on the simulator page. A REST snapshot (persisted, 500-row batches) replaced newer SignalR progress (executed tests). `mergeRunSnapshot` now keeps the newer live counters until the run is terminal. Covered by 2 client tests and re-verified in the browser (0 backwards moves).
+2. **Evidence could be silently understated.** Both evidence queries took 10,000 groups with no ordering or overflow check, so a large project could get undercounted or zero recurrence. The run query is now exact; it is bounded by the run itself, at most `Simulator:MaxTestCount`. The project-wide recurrence query refuses with 409 above 10,000 distinct messages. Covered by a test.
+3. **Undisclosed sampling.** Severity from a truncated analysis now carries a note naming the number of failures it covered. Covered by a test.
+4. **Unreadable log scopes.** Dictionary scopes printed as type names in console logs. They are now message-template scopes in CQ Pulse (3 places) and SmartDog (1).
+5. **Unhelpful status detail.** A status-check timeout showed "A task was canceled."; it now says "Unreachable: timed out waiting for a response." Covered by a test.
+6. **Test isolation.** The new overflow test's seeded rows broke the shared-database aggregate invariant for a later test; it now removes them. Found by the full suite run.
+
+**Secrets scan.** No secret scanner is installed, so two scans were run:
+
+- A pattern scan of tracked files and the full history of CQ Pulse (35 commits) and SmartDog (2) for private keys, cloud and VCS tokens, JWTs, connection-string passwords and non-empty secret JSON values. The pattern was self-tested against known samples. No matches.
+- An exact-value scan for the actual user-secret values (JWT signing key, development admin password, SmartDog's OpenAI key). It covered tracked, untracked and ignored files and history; LogTriageAssistant got a read-only scan of tracked and untracked files. 0 hits. No value was printed.
+
+Tracked `appsettings*.json` files contain no credentials, and the final E2E service logs contain neither the SmartDog key nor the LTA password.
+
+**Test results (final code):**
+
+| Command | Result |
+|---|---|
+| `dotnet test CQPulse.slnx --filter "Category!=Performance"` | ✅ Unit 66/66, Integration 109/109; 0 test databases left |
+| `dotnet test tests\CQPulse.IntegrationTests --filter "Category=Performance"` | ✅ 7/7 ([performance.md](performance.md)) |
+| `npx ng test --watch=false` / `npx ng build` | ✅ 50/50 (11 files) / ✅ initial 303.95 kB |
+| SmartDog `dotnet test` | ✅ 49/49 |
+| LogTriageAssistant `dotnet test` (built to a scratch folder) | ✅ 57/57; working tree unchanged (same 27 uncommitted entries) |
+
+**Not verified:** GitHub CI for these commits (not pushed); browsers other than Edge/Chromium; SmartDog's conversational flow (needs Ollama); a Release build.

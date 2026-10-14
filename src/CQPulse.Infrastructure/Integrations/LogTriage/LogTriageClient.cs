@@ -81,7 +81,7 @@ internal sealed class LogTriageClient(
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or TimeoutException
                                           or Polly.CircuitBreaker.BrokenCircuitException or Polly.Timeout.TimeoutRejectedException)
         {
-            return (false, $"Unreachable: {exception.GetBaseException().Message}");
+            return (false, ProbeDetail.Unreachable(exception));
         }
     }
 

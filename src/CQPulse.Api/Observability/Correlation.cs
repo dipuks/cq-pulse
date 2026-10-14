@@ -25,7 +25,9 @@ public sealed partial class CorrelationMiddleware(RequestDelegate next, ILogger<
             context.Response.Headers[HeaderName] = correlationId;
             return Task.CompletedTask;
         });
-        using (logger.BeginScope(new Dictionary<string, object> { [ItemKey] = correlationId }))
+        // A message-template scope: structured providers get the CorrelationId property and the simple console
+        // formatter (with IncludeScopes) prints it readably, unlike a dictionary scope.
+        using (logger.BeginScope("CorrelationId:{CorrelationId}", correlationId))
         {
             await next(context);
         }

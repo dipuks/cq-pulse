@@ -13,19 +13,21 @@ flowchart LR
         Worker -. progress .-> Hub[SignalR RunsHub]
         Worker -. run final .-> Observer[Run completion observers]
         Observer --> AQueue[(Analysis queue)] --> AWorker[AnalysisWorker] --> LTAClient[LogTriage client<br/>resilience pipeline]
+        Controllers --> Decisions[DecisionSupportService<br/>evidence builder] --> SDClient[SmartDog client<br/>resilience pipeline]
     end
     Writer --> SQL[(SQL Server)]
     Infra --> SQL
     LTAClient -- HTTPS, CSRF + cookie --> LTA[LogTriageAssistant]
+    SDClient -- HTTPS, X-Api-Key --> SD[SmartDog]
 ```
 
 ## Layers
 
 | Project | Responsibility |
 |---|---|
-| `CQPulse.Domain` | Entities and state machines: `TestRun` (Queued → Running → Passed / CompletedWithFailures / Failed / Cancelled), `FailureAnalysis` (Pending → Running → Succeeded / Failed / Unavailable) |
-| `CQPulse.Application` | DTOs and service contracts, `SimulationRequestValidator`, `SimulationWorkload` (deterministic workload generation), `FailureSignature`, `InsightCalculator`, typed exceptions |
-| `CQPulse.Infrastructure` | EF Core persistence and migrations, Identity, catalog service, simulator (queue, worker, writer, recovery), LogTriageAssistant integration |
+| `CQPulse.Domain` | Entities and state machines: `TestRun` (Queued → Running → Passed / CompletedWithFailures / Failed / Cancelled), `FailureAnalysis` (Pending → Running → Succeeded / Failed / Unavailable), `DecisionEvaluation` (Succeeded / Failed / Unavailable, with request, evidence and result) |
+| `CQPulse.Application` | DTOs and service contracts, `SimulationRequestValidator`, `SimulationWorkload` (deterministic workload generation), `FailureSignature`, `InsightCalculator`, decision criteria and severity scale, typed exceptions |
+| `CQPulse.Infrastructure` | EF Core persistence and migrations, Identity, catalog service, simulator (queue, worker, writer, recovery), LogTriageAssistant and SmartDog integrations, integration status |
 | `CQPulse.Api` | Controllers, JWT auth, Problem Details mapping, correlation middleware, SignalR hub, health checks, rate limiting |
 | `CQPulse.Client` | Angular standalone components: `core/` (API, auth, models), `shared/` (state, pager, chart), `layout/`, `features/*` (lazy) |
 
@@ -43,7 +45,8 @@ Measured behaviour: [performance.md](performance.md).
 
 - **Errors:** application exceptions map to RFC 7807 Problem Details (400 with field errors / 404 / 409); unexpected errors return a generic 500.
 - **Security:** JWT bearer (Administrator role on every data endpoint and the hub), Identity lockout, per-IP sign-in rate limit, CORS limited to configured origins. Secrets come only from user secrets or environment variables.
-- **Observability:** `X-Correlation-ID` per request (accepted or generated, echoed, in the log scope, stored on analyses, forwarded to integrations); structured logs with run and analysis ids; `/health` (liveness) and `/health/ready` (database). Optional integrations are reported separately at `/api/integrations/status`.
+- **Observability:** `X-Correlation-ID` per request (accepted or generated, echoed, in the log scope, stored on analyses and decision evaluations, forwarded to integrations). Logs carry run, analysis and correlation ids as message-template scopes, visible in console output with `Logging:Console:IncludeScopes=true`. `/health` (liveness) and `/health/ready` (database). Optional integrations are reported separately at `/api/integrations/status`.
+- **Live progress:** SignalR messages count executed tests, while REST returns persisted counters (written in batches of 500). The simulator page keeps the newer live value when a REST snapshot lags, so progress never moves backwards; a terminal snapshot is authoritative.
 - **Time:** all timestamps are stored as UTC `DateTimeOffset`. Filters use half-open UTC ranges `[fromUtc, toUtc)`, and daily aggregates use UTC calendar days.
 
 ## Known limits

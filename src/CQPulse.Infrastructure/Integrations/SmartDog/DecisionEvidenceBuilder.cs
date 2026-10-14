@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CQPulse.Application.Analysis;
+using CQPulse.Application.Common;
 using CQPulse.Application.Decisions;
 using CQPulse.Application.Insights;
 using CQPulse.Domain;
@@ -16,7 +17,9 @@ internal sealed record DecisionEvidence(
 /// Gathers the evidence for ranking a run's failure signatures, from persisted data only. Rules:
 /// <list type="bullet">
 /// <item>Options are the run's failure signatures, top <see cref="MaxOptions"/> by occurrences in the run (ties by signature).</item>
-/// <item>Occurrences, 30-day project recurrence and distinct affected catalog test cases are exact counts.</item>
+/// <item>Occurrences, 30-day project recurrence and distinct affected catalog test cases are exact counts. If the project has
+/// more than <see cref="MaxRecurrenceGroups"/> distinct failure messages in the window, recurrence cannot be counted exactly
+/// and the request is refused (409) rather than undercounting.</item>
 /// <item>Triage severity is used only if the run's latest completed LogTriageAssistant analysis has per-signature
 /// severities, was made from exactly the run's current failure data (same input digest), and covers every option.
 /// Otherwise the criterion is left out for all options and the reason is recorded: missing severity is never treated as 0.</item>
@@ -25,7 +28,8 @@ internal sealed record DecisionEvidence(
 internal static class DecisionEvidenceBuilder
 {
     public const int MaxOptions = 25;
-    private const int MaxGroups = 10_000;
+    /// <summary>Most distinct project-wide (category, message) pairs loaded to count 30-day recurrence in memory.</summary>
+    internal const int MaxRecurrenceGroups = 10_000;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public static async Task<DecisionEvidence> BuildAsync(
@@ -36,8 +40,7 @@ internal static class DecisionEvidenceBuilder
             .Where(x => x.TestRunId == runId && x.Outcome == TestOutcome.Failed)
             .GroupBy(x => new { x.FailureCategory, x.ErrorMessage, x.TestCaseId })
             .Select(g => new { g.Key.FailureCategory, g.Key.ErrorMessage, g.Key.TestCaseId, Count = g.Count() })
-            .Take(MaxGroups)
-            .ToListAsync(cancellationToken);
+            .ToListAsync(cancellationToken); // bounded by the run's failed results (at most Simulator:MaxTestCount)
 
         var signatures = groups
             .GroupBy(g => FailureSignature.Compute(g.FailureCategory, g.ErrorMessage))
@@ -66,8 +69,13 @@ internal static class DecisionEvidenceBuilder
                         x.CompletedAtUtc >= window.FromUtc && x.CompletedAtUtc < window.ToUtc)
             .GroupBy(x => new { x.FailureCategory, x.ErrorMessage })
             .Select(g => new { g.Key.FailureCategory, g.Key.ErrorMessage, Count = g.Count() })
-            .Take(MaxGroups)
+            .OrderByDescending(g => g.Count)
+            .Take(MaxRecurrenceGroups + 1)
             .ToListAsync(cancellationToken);
+        // Signatures are computed in memory, so every message must be loaded for exact counts: refuse rather than undercount.
+        if (recurrenceGroups.Count > MaxRecurrenceGroups)
+            throw new ConflictException($"The project has more than {MaxRecurrenceGroups:N0} distinct failure messages in the last 30 days, " +
+                "so exact recurrence counts cannot be computed. No ranking was requested.");
         var recurrence = recurrenceGroups
             .GroupBy(g => FailureSignature.Compute(g.FailureCategory, g.ErrorMessage))
             .ToDictionary(g => g.Key, g => g.Sum(x => x.Count));
@@ -127,6 +135,9 @@ internal static class DecisionEvidenceBuilder
             return (null, analysis.Id);
         }
         notes.Add("Triage severity comes from LogTriageAssistant analysis " + analysis.Id + " (highest finding severity per signature).");
+        if (document.Truncated)
+            notes.Add($"That analysis covered the run's first {document.FailureCount:N0} failed results by completion time (the " +
+                "Integrations:LogTriage document limits), so each severity reflects those results only.");
         return (map, analysis.Id);
     }
 }

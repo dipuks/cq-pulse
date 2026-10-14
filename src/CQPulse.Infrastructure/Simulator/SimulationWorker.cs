@@ -37,7 +37,7 @@ internal sealed class SimulationWorker(
         {
             await foreach (var runId in queue.ReadAllAsync(stoppingToken))
             {
-                using var _ = logger.BeginScope(new Dictionary<string, object> { ["RunId"] = runId });
+                using var _ = logger.BeginScope("RunId:{RunId}", runId);
                 try
                 {
                     await ProcessAsync(runId, stoppingToken);

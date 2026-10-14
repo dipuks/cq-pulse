@@ -13,6 +13,7 @@ using CQPulse.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using static CQPulse.IntegrationTests.Infrastructure.ApiTestHelpers;
 
@@ -81,6 +82,22 @@ public sealed class DecisionSupportTests(ApiFixture fixture)
         Assert.Null(evaluation.FailureAnalysisId);
         var sent = Assert.Single(smartDog.Requests).Body;
         Assert.All(sent.GetProperty("options").EnumerateArray(), o => Assert.False(o.GetProperty("values").TryGetProperty(DecisionCriteria.TriageSeverity, out _)));
+    }
+
+    [Fact]
+    public async Task Severity_from_a_truncated_analysis_says_which_results_it_covers()
+    {
+        await using var factory = WithIntegrations(new FakeLogTriageHandler(), new FakeSmartDogHandler(), ("Integrations:LogTriage:MaxFailures", "5"));
+        using var client = await AdminClientAsync(factory);
+        var run = await client.RunToCompletionAsync(NewRequest((await client.CreateProjectAsync()).Id, 60) with { FailureCategories = [FailureCategory.ApiError] });
+        var analysis = await AnalyzeAsync(client, run.Id);
+        Assert.True(analysis.InputTruncated);
+
+        var evaluation = await (await client.PostJsonAsync($"/api/runs/{run.Id}/decision-support", new { })).ReadAsync<DecisionEvaluationDto>();
+
+        Assert.Equal("CRITICAL", Assert.Single(evaluation.Evidence).TriageSeverity);
+        Assert.Contains("That analysis covered the run's first 5 failed results by completion time (the Integrations:LogTriage document limits), " +
+            "so each severity reflects those results only.", evaluation.EvidenceNotes);
     }
 
     [Fact]
@@ -201,6 +218,42 @@ public sealed class DecisionSupportTests(ApiFixture fixture)
     }
 
     [Fact]
+    public async Task Recurrence_that_cannot_be_counted_exactly_is_refused_not_undercounted()
+    {
+        var smartDog = new FakeSmartDogHandler();
+        await using var factory = WithIntegrations(new FakeLogTriageHandler(), smartDog);
+        using var client = await AdminClientAsync(factory);
+        var project = await client.CreateProjectAsync();
+        var run = await client.RunToCompletionAsync(NewRequest(project.Id, 30));
+        var other = await client.RunToCompletionAsync(NewRequest(project.Id, 5));
+        await fixture.WithDbContextAsync(async db =>
+        {
+            var now = DateTimeOffset.UtcNow;
+            db.TestCaseResults.AddRange(Enumerable.Range(0, DecisionEvidenceBuilder.MaxRecurrenceGroups + 1).Select(i => new TestCaseResult
+            {
+                TestRunId = other.Id, TestCaseNameSnapshot = "Seeded", Outcome = TestOutcome.Failed, StartedAtUtc = now, CompletedAtUtc = now,
+                ErrorMessage = $"Distinct failure {i}", FailureCategory = FailureCategory.ApiError
+            }));
+            return await db.SaveChangesAsync();
+        });
+
+        try
+        {
+            var response = await client.PostJsonAsync($"/api/runs/{run.Id}/decision-support", new { });
+
+            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.Contains("exact recurrence counts cannot be computed", await response.Content.ReadAsStringAsync());
+            Assert.Empty(smartDog.Requests);
+            Assert.Empty(await client.GetJsonAsync<List<DecisionEvaluationDto>>($"/api/runs/{run.Id}/decision-support"));
+        }
+        finally
+        {
+            // The seeded rows bypass the run counters; remove them so the shared database stays consistent for other tests.
+            await fixture.WithDbContextAsync(db => db.TestCaseResults.Where(x => x.TestRunId == other.Id && x.TestCaseNameSnapshot == "Seeded").ExecuteDeleteAsync());
+        }
+    }
+
+    [Fact]
     public async Task Ranked_options_link_to_their_failed_results()
     {
         await using var factory = WithIntegrations(new FakeLogTriageHandler(), new FakeSmartDogHandler());
@@ -231,6 +284,10 @@ public sealed class DecisionSupportTests(ApiFixture fixture)
         Assert.Equal(("Healthy", true), (healthy.Single(s => s.Name == "SmartDog").Status, healthy.Single(s => s.Name == "SmartDog").Configured));
         Assert.Equal("Unavailable", down.Single(s => s.Name == "SmartDog").Status);
         Assert.Equal("Healthy", down.Single(s => s.Name == "LogTriageAssistant").Status);
+
+        smartDog.HealthDelay = TimeSpan.FromSeconds(30);
+        var slow = (await client.GetJsonAsync<List<IntegrationStatusDto>>("/api/integrations/status")).Single(s => s.Name == "SmartDog");
+        Assert.Equal(("Unavailable", "Unreachable: timed out waiting for a response."), (slow.Status, slow.Detail));
     }
 
     [Fact]
@@ -244,7 +301,7 @@ public sealed class DecisionSupportTests(ApiFixture fixture)
         Assert.Equal(HttpStatusCode.Forbidden, (await viewer.GetAsync($"/api/decision-evaluations/{Guid.NewGuid()}")).StatusCode);
     }
 
-    private WebApplicationFactory<Program> WithIntegrations(FakeLogTriageHandler lta, FakeSmartDogHandler smartDog) =>
+    private WebApplicationFactory<Program> WithIntegrations(FakeLogTriageHandler lta, FakeSmartDogHandler smartDog, params (string Key, string Value)[] settings) =>
         fixture.Factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Integrations:LogTriage:BaseUrl", "https://logtriage.test");
@@ -258,6 +315,7 @@ public sealed class DecisionSupportTests(ApiFixture fixture)
             builder.UseSetting("Integrations:SmartDog:RetryCount", "1");
             builder.UseSetting("Integrations:SmartDog:RetryBaseDelayMilliseconds", "10");
             builder.UseSetting("Integrations:SmartDog:AttemptTimeoutSeconds", "1");
+            foreach (var (key, value) in settings) builder.UseSetting(key, value);
             builder.ConfigureTestServices(services =>
             {
                 services.AddHttpClient<LogTriageClient>().ConfigurePrimaryHttpMessageHandler(() => lta);

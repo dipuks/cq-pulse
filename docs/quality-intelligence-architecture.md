@@ -1,31 +1,32 @@
 # Quality Intelligence Architecture
 
-Status: design confirmed from source inspection on 2026-10-13. Sections marked **Proposed** need the decisions listed at the end.
+Status: implemented and verified end to end on 2026-10-14. The LogTriageAssistant integration (Q2), historical insights (Q3) and SmartDog decision support (Q4) are complete. The design decisions are recorded in §8.
 
 CQ Pulse is the user-facing application. LogTriageAssistant and SmartDog stay independent applications in their own folders and repositories, with their own UIs, storage and release cycles. CQ Pulse talks to them only over HTTP, through the contracts below. No code or domain logic is copied between them.
 
-## 1. Components as verified
+## 1. Components
 
 | | CQ Pulse | LogTriageAssistant (LTA) | SmartDog |
 |---|---|---|---|
-| Location | `C:\Projects\CQPulse` (git, branch `feature/product-completion`) | `C:\Projects\LogTriageAssistant` (git `main`, **large uncommitted user rewrite in progress**) | `C:\Projects\SmartDog` (**not a git repository**) |
-| Stack | .NET 10 API + Angular 22 + SQL Server | .NET 10 minimal API + React/Vite + SQLite | .NET 10 controllers + static UI; in-memory sessions |
+| Location | `C:\Projects\CQPulse` (git `main`) | `C:\Projects\LogTriageAssistant` (git `main`, with the owner's uncommitted rewrite; **not modified by this work**) | `C:\Projects\SmartDog` (git `main`, initialized for this work; baseline snapshot commit first) |
+| Stack | .NET 10 API + Angular 22 + SQL Server | .NET 10 minimal API + React/Vite + SQLite | .NET 10 controllers + static UI; in-memory chat sessions |
 | Local URL | API `https://localhost:7256`, client `http://localhost:4200` | `https://localhost:7291` (`http://localhost:5219`) | `https://localhost:7018` (`http://localhost:5021`) |
-| Build/tests at audit | 43 unit + 52 integration + 30 client tests pass | `dotnet test`: 57/57 pass (current working tree, built to a scratch folder) | Builds (0 warnings); **no tests** |
-| Auth | JWT bearer, Administrator role | Cookie session + CSRF header (`X-CSRF-TOKEN`) on every API write; open registration; per-account history | **None** |
+| Tests (2026-10-14) | 66 unit + 109 integration + 50 client | 57 (unchanged) | 49 (36 evaluator + 13 API) |
+| Auth used by CQ Pulse | JWT bearer, Administrator role (its own users) | Cookie session + CSRF header with a dedicated service account | `X-Api-Key` on the decision API (SHA-256 digests compared in constant time); chat endpoints unchanged and unauthenticated |
 
-### LogTriageAssistant contract (verified in `Program.cs` and `Models/LogAnalysisModels.cs`)
+### LogTriageAssistant contract (used unchanged)
 
 - `GET /api/auth/csrf` → `{ token }` (sets the antiforgery cookie). `POST /api/auth/login {username, password}` with `X-CSRF-TOKEN` → 204 + `__Host-LogTriage.Auth` cookie (HTTPS only).
-- `POST /api/analyze {logText, fileName}` (max 2 MB, CSRF required) → `LogAnalysisResult`: `id`, `analyzedAt`, `summary`, `severity` (CRITICAL/HIGH/MEDIUM/INFO), `confidence` (a heuristic signal score; LTA's README says it is **not** a calibrated probability), `findingsTruncated`, `statistics {totalLines, errorLikeLines, uniqueCategories, topCategory}`, `findings[] {lineNumber, endLineNumber, timestamp, message, severity, category, evidence (redacted), suggestion}`, `recommendations[]`. The result is saved in LTA's history for the calling account (capped, default 1,000 analyses).
-- `GET /api/recent/{id}` returns a saved analysis. `GET /health`, `GET /health/ready` (anonymous).
-- The analyzer is deterministic keyword/signature ranking and parses JSON/JSONL log fields. AI briefs (`/api/ai/analyze`) are optional, need Ollama or a hosted key, and are not persisted. **CQ Pulse uses only the deterministic analyzer.**
+- `POST /api/analyze {logText, fileName}` (max 2 MB, CSRF required) → `LogAnalysisResult`: `id`, `analyzedAt`, `summary`, `severity` (CRITICAL/HIGH/MEDIUM/INFO), `confidence` (a heuristic signal score; LTA's README says it is **not** a calibrated probability), `findingsTruncated`, `statistics`, `findings[] {lineNumber, endLineNumber, timestamp, message, severity, category, evidence (redacted), suggestion}`, `recommendations[]`. The result is saved in LTA's history for the calling account.
+- `GET /health`, `GET /health/ready` (anonymous).
+- The analyzer is deterministic keyword/signature ranking. AI briefs (`/api/ai/analyze`) are optional and **not used** by CQ Pulse.
 
-### SmartDog contract (verified in `DecisionSessionsController.cs`, `DecisionSolver.cs`)
+### SmartDog contract (added in SmartDog commit `af04474`; chat flow unchanged)
 
-- Only conversational endpoints: `POST /api/decision-sessions`, `…/{id}/messages`, `…/{id}/interpret` (needs a local Ollama model to turn text into a `DecisionProblem`), `…/{id}/analyze`, `…/{id}/chat`.
-- There is **no endpoint that accepts a structured `DecisionProblem`**.
-- `DecisionSolver` v0.1 only checks hard numeric constraints (`property op number`) on referenced entities. `DecisionAlternative.Score` is never set, and objective-based selection is explicitly "not yet implemented" (it returns `NoUniqueDecision`). **SmartDog cannot currently rank options, and makes no predictions.**
+- `POST /api/decisions/evaluate` with `X-Api-Key`: criteria (id, name, weight > 0 and ≤ 1000, `maximize`/`minimize`), options with one finite value per criterion, and optional hard constraints (`<`, `<=`, `>`, `>=`, `==`, `!=`). Limits: 20 criteria, 200 options, 50 constraints.
+- **Method:** options violating a hard constraint are excluded and reported in `infeasible`. Each criterion is min–max normalized to 0–1 across the remaining options (1 = best; identical values normalize to 1 and cannot change the order). Weights are normalized to sum to 1. Score = Σ weight share × normalized value. Ties (within 1e-9) are ordered by option id and listed.
+- **Response:** `status` (`Ranked` / `NoFeasibleOption`), `ranking[]` with per-criterion `contributions` and an `explanation`, `criteria[]`, `infeasible[]`, `notes[]`, `method`, `limitations`, `evaluationId`. `400` returns a validation problem keyed by field path, `401` a missing or wrong key, and `503` an instance without configured keys.
+- Stateless; no language model or machine learning; no predictions. Full contract: SmartDog `README.md`.
 
 ## 2. Data flow
 
@@ -34,16 +35,18 @@ Simulator run (CQ Pulse)  ──persists──▶ TestRuns / TestCaseResults / E
         │ run reaches a terminal state with failures (or user clicks "Analyze")
         ▼
 FailureAnalysis record (Pending) ──bounded background queue──▶ LTA client
-        │ builds a bounded, redaction-safe JSONL document from persisted failures + logs
-        │ (runId, resultId, testCaseId, signature, category, message, correlationId)
+        │ bounded JSONL document from persisted failures (runId, resultId, testCaseId, signature, category, message)
         ▼
 LTA POST /api/analyze ──▶ severity, findings, evidence, suggestions, external id
-        │ stored on FailureAnalysis (Succeeded / Failed / Unavailable + error, attempts, timestamps)
+        │ stored on FailureAnalysis, including the highest finding severity per CQ Pulse signature
         ▼
 CQ Pulse historical analytics (own data): failure signatures, recurrence, flaky candidates, anomalies
         │
-        ▼ (Proposed, see decisions)
-SmartDog structured evaluation ──▶ ranked investigation options + criteria + rationale (advisory)
+        ▼ user asks "what to investigate first?" (Run detail → Decision support)
+Evidence from persisted data ──▶ SmartDog POST /api/decisions/evaluate ──▶ ranking + contributions + explanations
+        │ stored on DecisionEvaluation (request, evidence, notes, result or error, correlation id)
+        ▼
+Run detail panel: ranking, breakdown, notes, evidence, history; links to each signature's failed results
 ```
 
 ## 3. Responsibilities (no logic duplication)
@@ -53,34 +56,54 @@ SmartDog structured evaluation ──▶ ranked investigation options + criteria
 | Executing and persisting runs; counters; run status | CQ Pulse only |
 | Failure signatures, recurrence counts, flaky candidates, trend baselines and anomalies | CQ Pulse (computed from its own persisted results) |
 | Log classification, severity, redacted evidence, suggested next steps | LogTriageAssistant |
-| Ranking and explaining candidate actions against criteria and constraints | SmartDog (**Proposed** extension) |
+| Ranking and explaining options against weighted criteria and hard constraints | SmartDog |
+| Choosing the evidence and deciding what is missing | CQ Pulse (§6) |
 
 ## 4. Reliability rules
 
-- Analysis is **asynchronous and never part of run execution**. A run's results, counters and terminal status are final before any analysis starts. External failures only change the `FailureAnalysis`/`Recommendation` records.
-- Per-service typed `HttpClient` with configurable base URL, timeouts and bounded retries for transient failures only (network errors, 408, 429, 5xx), plus a circuit breaker. A 4xx contract error is not retried.
-- Lifecycle states are persisted: `Pending → Running → Succeeded | Failed | Unavailable`. Each record keeps attempts, last error, timestamps and correlation ID.
-- **Idempotency:** each analysis request carries a SHA-256 digest of its input document. Re-requesting an analysis whose input has not changed returns the existing successful record unless the user explicitly retries. A retry re-submits stored run data only; it never re-runs the workload.
-- Malformed or partial responses are recorded as `Failed` with the reason; nothing is fabricated.
-- A bounded in-process channel (the same pattern as the simulator) processes analysis jobs. Startup recovery moves interrupted `Running` analyses to `Failed` with a retry hint. No broker or cache is needed at this scale.
+- Analysis and decision support are **never part of run execution**. A run's results, counters and terminal status are final before either starts. External failures only change `FailureAnalysis` / `DecisionEvaluation` records.
+- Per-service typed `HttpClient` with configurable base URL, per-attempt timeout and bounded retries for transient failures only (network errors, 408, 429, 5xx), plus a circuit breaker (`AddStandardResilienceHandler`). A 4xx contract error is not retried.
+- Lifecycle states are persisted. Analyses: `Pending → Running → Succeeded | Failed | Unavailable`. Decision evaluations: `Succeeded`, `Failed` (rejected key, validation error, malformed response) or `Unavailable` (down, timeout, not configured). Each record keeps its error, timestamps and correlation id.
+- **Idempotency (analyses):** each request carries a SHA-256 digest of its input document. Re-requesting an unchanged analysis returns the existing record unless the user explicitly retries. A retry re-submits stored run data only; it never re-runs the workload.
+- Decision evaluations are explicit user requests. Each one is stored, so the history shows how rankings changed with weights or evidence.
+- Malformed or partial responses are recorded as `Failed` with the reason. Nothing is fabricated: an unavailable service produces no ranking, only the recorded evidence and the error.
+- Startup recovery moves interrupted `Running` analyses to `Unavailable` and re-queues `Pending` ones.
 
 ## 5. Observability and security
 
-- A `X-Correlation-ID` header is accepted or created per request, added to the log scope, persisted on analysis records, and sent on outbound calls.
-- Structured logs carry `RunId`, `TestCaseResultId`, `AnalysisId`, `CorrelationId`. Log documents sent to LTA contain only simulator data (test names, categories, messages). The LTA service password and any keys live in user secrets or environment variables.
-- `GET /api/integrations/status` (admin) reports each dependency's health (`/health/ready`) and configuration. CQ Pulse's own `/health/ready` stays limited to its database, so an optional dependency outage degrades features instead of taking CQ Pulse down.
-- **LTA authentication without changing LTA:** a dedicated LTA account for CQ Pulse (`IntegrationServices:LogTriage:Username/Password` in user secrets). The client performs the CSRF + cookie login and re-authenticates on 401.
+- An `X-Correlation-ID` header is accepted or created per request and echoed. It is added to the log scope and persisted on analysis and decision records. It is also sent on outbound calls: SmartDog echoes it and adds it to its own log scope, while LTA receives it but does not log it. Scopes are message templates (`CorrelationId:{CorrelationId}`, `RunId:{RunId}`, `AnalysisId:{AnalysisId} …`), so the simple console formatter shows them with `Logging:Console:IncludeScopes=true` and structured providers get named properties.
+- Automatic analyses are queued by the worker after a run finishes, so they get their own correlation id. The id of the request that queued the run is not stored on the run.
+- `GET /api/integrations/status` (admin) checks each configured dependency in parallel with a 5-second limit. LTA is checked at `/health/ready` and SmartDog at `/health`; the result is NotConfigured, Healthy or Unavailable with the reason. CQ Pulse's own `/health/ready` covers only its database, so an optional dependency outage degrades features instead of taking CQ Pulse down.
+- Credentials (`Integrations:LogTriage:Username/Password`, `Integrations:SmartDog:ApiKey`) live only in user secrets or environment variables. Log documents sent to LTA and evidence sent to SmartDog contain only simulator data (test names, categories, messages, counts).
 
-## 6. Historical analysis approach (Phase 5)
+## 6. Decision-support evidence rules
 
-- **Failure signature:** normalized error message (digits, GUIDs and quoted values stripped) + failure category + test case identity. The counts and first/last seen are directly verifiable.
-- **Flaky candidate:** the same test case (by `TestCaseId`) has both passed and failed within a window, with at least N executions. Shown with counts and the window. For simulated cases with `SimulatedOutcome = Random`, flakiness is **by design**, and the UI says so.
-- **Anomaly:** daily failure rate compared with a trailing baseline (mean ± k·standard deviation, with a minimum number of baseline days and results). Shown with the baseline, threshold and data volume. This is a statistical rule, not machine learning.
-- **Prediction:** not offered unless there is enough history for an evaluable method (holdout comparison). Otherwise the UI shows "insufficient history".
+Each failure signature in the run is one option; at most 25 (the most frequent in the run, ties by signature) are submitted, and a note says when more exist.
 
-## 7. Decisions required
+| Criterion (id) | Default weight | Value | When it is unavailable |
+|---|---:|---|---|
+| Occurrences in this run (`occurrencesInRun`) | 0.35 | Exact count of the run's failed results with the signature | Always available for a finished run with failures |
+| Project recurrence, 30 days (`recurrence30d`) | 0.25 | Exact count over the last 30 UTC days in the project, this run included; 0 when none | More than 10,000 distinct failure messages in the window: the request is refused (409) instead of undercounting |
+| Affected catalog test cases (`affectedTestCases`) | 0.15 | Distinct catalog test cases that failed with the signature in the run (0 for synthetic workloads, which have none) | — |
+| Triage severity (`triageSeverity`) | 0.25 | Highest LTA finding severity on the signature's document lines: INFO 1, MEDIUM 2, HIGH 3, CRITICAL 4 | Left out for **all** options, with the reason, unless the run's latest successful analysis has per-signature severities, was built from exactly the run's current failure data (same digest) and covers every option. A missing severity is never treated as 0 |
 
-1. **SmartDog (not under git):** initialize a git repository there to snapshot the current state before any change?
-2. **SmartDog extension:** add a structured `POST /api/decisions/evaluate` endpoint (accepts a `DecisionProblem` directly, no LLM) and implement transparent weighted-objective ranking (scores per criterion, explanations), with API-key auth for service callers and a test project. Without this, SmartDog can only report feasibility and cannot rank, so CQ Pulse's decision-support view would be limited to that.
-3. **LTA service account:** create a dedicated account in your local LTA instance, or let CQ Pulse use an account you register yourself.
-4. **Apply the M5 migration** to the development database (SQL in `feature-audit.md`).
+- Weights are relative (> 0 and ≤ 1000) and SmartDog normalizes them. A weight given for an unavailable criterion is reported as not applied.
+- *Minimum occurrences* (1–1,000,000) becomes a hard constraint, and options below it are reported as infeasible rather than hidden.
+- When the analysis covered only part of the run (the document limit is 2,000 failures and 1.5 MB), the note says that severity reflects the first N failures by completion time.
+- Requests for an active run, or a run without failures, are rejected (409) and nothing is sent.
+
+## 7. Historical analysis approach (Q3)
+
+- **Failure signature:** failure category + normalized error message (digits, GUIDs and quoted values replaced), 12-hex SHA-256 id. The counts and first/last seen are directly verifiable.
+- **Flaky candidate:** the same catalog test case has both passed and failed within a window, with at least N executions. For simulated cases with `SimulatedOutcome = Random`, flakiness is **by design**, and the UI says so.
+- **Anomaly:** daily failure rate compared with a trailing baseline (mean ± k·standard deviation, with minimum baseline days and results). This is a statistical rule, not machine learning.
+- **Prediction:** not offered; the API and UI say so.
+
+## 8. Decisions (resolved)
+
+| Decision | Outcome |
+|---|---|
+| Snapshot SmartDog before changing it | `git init`; baseline commit `f377a89` of the existing code, excluding build output, databases and local secrets |
+| SmartDog structured endpoint | `POST /api/decisions/evaluate` with transparent weighted ranking, API-key auth and 49 tests (commit `af04474`); chat workflow preserved |
+| LTA service account | A dedicated account registered in the LTA instance; credentials in CQ Pulse user secrets |
+| Migrations | `AddRunConcurrencyAndActiveRunIndex`, `AddRunRerunLink`, `AddFailureAnalyses` and `AddDecisionEvaluations` applied to the development database after backups, a rehearsal on a restored copy, and data verification (see `feature-audit.md`) |

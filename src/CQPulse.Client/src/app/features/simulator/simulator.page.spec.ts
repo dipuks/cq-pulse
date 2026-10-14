@@ -2,10 +2,33 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { SimulatorLimits } from '../../core/models';
-import { SimulatorPage, defaultRequest, validateRequest } from './simulator.page';
+import { RunDetail, SimulatorLimits } from '../../core/models';
+import { SimulatorPage, defaultRequest, mergeRunSnapshot, validateRequest } from './simulator.page';
 
 const limits: SimulatorLimits = { maxTestCount: 50_000, maxConcurrency: 128, maxDurationMs: 60_000, largeWorkloadThreshold: 10_000 };
+
+describe('mergeRunSnapshot', () => {
+  const run = (overrides: Partial<RunDetail>): RunDetail => ({
+    id: 'r1', projectId: 'p1', runLabel: 'Run', status: 'Running', requestedAtUtc: '2026-10-14T10:00:00Z', totalTests: 20_000,
+    completedTests: 0, passedCount: 0, failedCount: 0, skippedCount: 0, configurationSnapshot: '{}', rerunIds: [], ...overrides
+  });
+
+  it('keeps newer live progress when the persisted snapshot lags behind', () => {
+    const live = run({ completedTests: 7_800, passedCount: 5_850, failedCount: 1_560, skippedCount: 390 });
+    const merged = mergeRunSnapshot(live, run({ completedTests: 7_500, passedCount: 5_625, failedCount: 1_500, skippedCount: 375, startedAtUtc: '2026-10-14T10:00:01Z' }));
+
+    expect([merged.completedTests, merged.passedCount, merged.failedCount, merged.skippedCount]).toEqual([7_800, 5_850, 1_560, 390]);
+    expect(merged.startedAtUtc).toBe('2026-10-14T10:00:01Z');
+  });
+
+  it('takes the snapshot when it is ahead, terminal or for another run', () => {
+    const live = run({ completedTests: 7_800 });
+    expect(mergeRunSnapshot(live, run({ completedTests: 8_000 })).completedTests).toBe(8_000);
+    expect(mergeRunSnapshot(live, run({ status: 'Cancelled', completedTests: 7_500 })).completedTests).toBe(7_500);
+    expect(mergeRunSnapshot(live, run({ id: 'r2', completedTests: 10 })).completedTests).toBe(10);
+    expect(mergeRunSnapshot(null, run({ completedTests: 10 })).completedTests).toBe(10);
+  });
+});
 
 describe('validateRequest', () => {
   const valid = { ...defaultRequest(), projectId: 'p1' };

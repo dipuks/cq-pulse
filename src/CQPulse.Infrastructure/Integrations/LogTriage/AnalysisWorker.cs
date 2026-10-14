@@ -62,10 +62,8 @@ internal sealed class AnalysisWorker(
         var analysis = await db.FailureAnalyses.SingleOrDefaultAsync(x => x.Id == analysisId, stoppingToken);
         if (analysis is null || analysis.Status != AnalysisStatus.Pending) return;
 
-        using var _ = logger.BeginScope(new Dictionary<string, object>
-        {
-            ["AnalysisId"] = analysis.Id, ["RunId"] = analysis.TestRunId, ["CorrelationId"] = analysis.CorrelationId
-        });
+        using var _ = logger.BeginScope("AnalysisId:{AnalysisId} RunId:{RunId} CorrelationId:{CorrelationId}",
+            analysis.Id, analysis.TestRunId, analysis.CorrelationId);
         analysis.Start(DateTimeOffset.UtcNow);
         await db.SaveChangesAsync(stoppingToken);
 

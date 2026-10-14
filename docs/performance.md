@@ -35,6 +35,18 @@ xUnit ran the cases in this order: 1k#2, 10k#2, 1k#3, 50k#1, 1k#1, 10k#3, 10k#1.
 - **Throughput** is roughly 2,500–2,800 tests/s once warm, limited by SQL Server inserts (results plus failure logs, 500 per transaction) rather than by simulated execution.
 - **50,000 cases: verified** on this machine (one run). It is not a capacity guarantee for other hardware, remote databases or long per-test durations. With realistic durations, run time is roughly `testCount × averageDuration ÷ concurrency`.
 
+## Re-run on 2026-10-14 (after decision support)
+
+All 7 cases passed with exact totals. The machine was also running LogTriageAssistant, SmartDog, a second CQ Pulse API and the Angular dev server for end-to-end checks, so treat these figures as indicative.
+
+| Workload | Runs (server time) | Throughput | Peak managed heap |
+|---:|---|---|---|
+| 1,000 | 0.33 s, 1.22 s (first, cold), 0.66 s | 822–3,021 tests/s | 25–33 MB |
+| 10,000 | 3.21 s, 6.71 s, 3.35 s | 1,491–3,110 tests/s | 30–39 MB |
+| 50,000 | 17.18 s | 2,910 tests/s | 38 MB |
+
+**Decision support at the largest run size** (end to end through the dev proxy, real SmartDog): a 50,000-test synthetic run (35,000/12,500/2,500) finished in 18.0 s. Its automatic LogTriageAssistant analysis succeeded after 1.0 s; its document was truncated at 2,000 failures and the evidence notes say so. Three decision requests took **596, 242 and 208 ms** each, covering evidence queries, the SmartDog round trip and persistence. The evidence counted all 12,500 failures exactly across 4 signatures.
+
 ## Not measured
 
 - Concurrent runs (the worker executes one run at a time by design).
