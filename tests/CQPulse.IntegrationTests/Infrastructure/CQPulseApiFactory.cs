@@ -20,5 +20,7 @@ public sealed class CQPulseApiFactory(TestDatabase database) : WebApplicationFac
         builder.UseEnvironment(EnvironmentName);
         builder.UseSetting("ConnectionStrings:CQPulse", database.ConnectionString);
         builder.UseSetting("Jwt:SigningKey", JwtSigningKey);
+        // In-memory requests share one rate-limit partition (no client IP); tests that need the limit set it explicitly.
+        builder.UseSetting("RateLimiting:Login:PermitLimit", "100000");
     }
 }

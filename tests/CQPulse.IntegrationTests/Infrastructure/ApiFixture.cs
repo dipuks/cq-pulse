@@ -81,6 +81,15 @@ public sealed class ApiFixture : IAsyncLifetime
         return await work(scope.ServiceProvider.GetRequiredService<CQPulseDbContext>());
     }
 
+    /// <summary>Creates an additional user, e.g. for lockout tests that must not affect the shared users.</summary>
+    public async Task<TestUser> CreateUserAsync(string name, string? role = null)
+    {
+        var testUser = NewUser(name, role);
+        await using var scope = Factory.Services.CreateAsyncScope();
+        await AddUserAsync(scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>(), testUser);
+        return testUser;
+    }
+
     private async Task SeedUsersAsync()
     {
         await using var scope = Factory.Services.CreateAsyncScope();
@@ -89,12 +98,14 @@ public sealed class ApiFixture : IAsyncLifetime
         if (!await roles.RoleExistsAsync(AdministratorRole))
             Ensure(await roles.CreateAsync(new IdentityRole(AdministratorRole)));
 
-        foreach (var testUser in new[] { Administrator, NonAdministrator })
-        {
-            var user = new ApplicationUser { UserName = testUser.Email, Email = testUser.Email, EmailConfirmed = true, DisplayName = testUser.Email };
-            Ensure(await users.CreateAsync(user, testUser.Password));
-            if (testUser.Role is not null) Ensure(await users.AddToRoleAsync(user, testUser.Role));
-        }
+        foreach (var testUser in new[] { Administrator, NonAdministrator }) await AddUserAsync(users, testUser);
+    }
+
+    private static async Task AddUserAsync(UserManager<ApplicationUser> users, TestUser testUser)
+    {
+        var user = new ApplicationUser { UserName = testUser.Email, Email = testUser.Email, EmailConfirmed = true, DisplayName = testUser.Email };
+        Ensure(await users.CreateAsync(user, testUser.Password));
+        if (testUser.Role is not null) Ensure(await users.AddToRoleAsync(user, testUser.Role));
     }
 
     private static TestUser NewUser(string name, string? role) =>

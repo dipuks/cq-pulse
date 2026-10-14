@@ -205,3 +205,29 @@ Builds used `--artifacts-path` because a running `CQPulse.Api.exe` (started by t
 | Dev DB baseline (read-only) | Unchanged; 0 test databases left |
 
 **Not verified in a real browser:** live SignalR in the browser. The server path is covered by integration tests; the browser client could not be exercised in this session.
+
+### M5 — Concurrency, single active run, execution logs, sign-in hardening (2026-10-13)
+
+**Migration `20261014023133_AddRunConcurrencyAndActiveRunIndex` (additive, NOT applied to the development database):**
+
+```sql
+ALTER TABLE [TestRuns] ADD [RowVersion] rowversion NULL;
+CREATE UNIQUE INDEX [UX_TestRuns_ActiveTarget] ON [TestRuns] ([ProjectId], [TestSuiteId]) WHERE [Status] IN (0, 1);
+```
+
+Precondition checked read-only on the dev DB: 0 queued/running runs, so the unique index can be created. Until it is applied, the new API code cannot run against the development database (EF expects the `RowVersion` column).
+
+| Plan item | Change | Evidence |
+|---|---|---|
+| 1.3 Cancel/complete race | `RowVersion` concurrency token (shadow property). The worker re-decides the terminal state from fresh data and retries on `DbUpdateConcurrencyException`, so an accepted cancellation always wins. Start is skipped if the run changed after dequeue. Cancel retries on conflicts and returns 409 if the run finished meanwhile. | `Run_rowversion_detects_concurrent_updates`; `Accepted_cancellation_is_never_overwritten_by_completion` (12 cancels at varied timings: every 204 ends `Cancelled`, every 409 ends non-cancelled, counters = rows) |
+| 1.8 Duplicate submission | Filtered unique index `UX_TestRuns_ActiveTarget` plus a pre-check. An index violation maps to a 409 with a clear message. | `Concurrent_submissions_for_one_target_queue_exactly_one_run` (8 parallel POSTs → exactly 1×202, 7×409); `Database_rejects_a_second_active_run_for_the_same_target`; `Terminal_runs_do_not_block_new_runs_for_the_same_target` |
+| 1.7 Execution logs | Run started/finished entries (with seed, totals, error summary), and one entry per failed test linked to its result, written in the same transaction as the result batch | `Runs_record_lifecycle_and_failed_test_logs` (logs = failures + 2; paged newest-first) |
+| 1.10 Sign-in hardening | Identity lockout (5 failures → 5 minutes) with the same 401 for locked and wrong-password cases (no account enumeration). Per-IP fixed-window rate limit on `/api/auth/login` (default 10/min, `RateLimiting:Login`). Runs store the requesting user **id**. | `Repeated_wrong_passwords_lock_the_account`, `Successful_sign_in_resets_the_failed_attempt_count`, `Sign_in_is_rate_limited` (3 × 401 then 429), `Run_records_the_requesting_user_id` |
+
+| Command | Result |
+|---|---|
+| `dotnet test CQPulse.slnx --artifacts-path <scratch>` (×4) | ✅ Unit 43/43, Integration 52/52 every run (~30 s) |
+| `dotnet ef migrations has-pending-model-changes` | ✅ No changes since last migration |
+| Dev DB baseline (read-only) | Unchanged; only `InitialCreate` applied; 0 test databases left |
+
+The migration was created with `--configuration Release` because the user's running API locks the Debug output.

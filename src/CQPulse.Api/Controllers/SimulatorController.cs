@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using CQPulse.Application.Runs;
 using CQPulse.Application.Simulation;
 using CQPulse.Infrastructure.Persistence;
@@ -23,7 +24,7 @@ public sealed class SimulatorController(
     [HttpPost("runs")]
     public async Task<ActionResult<QueuedRunResponse>> Start(SimulationRequest request, CancellationToken cancellationToken)
     {
-        var runId = await simulationService.QueueAsync(request, User.Identity?.Name, cancellationToken);
+        var runId = await simulationService.QueueAsync(request, User.FindFirstValue(ClaimTypes.NameIdentifier), cancellationToken);
         return AcceptedAtAction(nameof(GetRun), new { runId }, new QueuedRunResponse(runId));
     }
 

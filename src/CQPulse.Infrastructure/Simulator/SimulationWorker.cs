@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using LogLevel = CQPulse.Domain.LogLevel;
 using Microsoft.Extensions.Options;
 
 namespace CQPulse.Infrastructure.Simulator;
@@ -27,6 +28,7 @@ internal sealed class SimulationWorker(
     ILogger<SimulationWorker> logger) : BackgroundService
 {
     private const int MaxSummaryLength = 1_000;
+    private const int MaxSaveAttempts = 10;
     private SimulatorOptions Settings => options.Value;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -82,8 +84,19 @@ internal sealed class SimulationWorker(
         }
 
         run.Start(DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync(stoppingToken);
+        try
+        {
+            await db.SaveChangesAsync(stoppingToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Cancelled between dequeue and start: the run was changed by another request, so do not execute it.
+            logger.LogInformation("Simulation run {RunId} changed before it started (likely cancelled); skipping.", runId);
+            return;
+        }
         await PublishSafelyAsync(publisher, ToProgress(run, null));
+        await WriteLogAsync(db, runId, LogLevel.Information,
+            $"Run started: {request.TestCount:N0} tests, concurrency {request.MaxConcurrency}, seed {request.RandomSeed?.ToString() ?? "random"}.");
         logger.LogInformation("Simulation run {RunId} started: {TestCount} tests, concurrency {Concurrency}.",
             runId, request.TestCount, request.MaxConcurrency);
 
@@ -199,34 +212,72 @@ internal sealed class SimulationWorker(
     private async Task FinishAsync(
         CQPulseDbContext db, IRunProgressPublisher publisher, Guid runId, Exception? executionFailure, Exception? persistenceFailure)
     {
-        // Reload: a user cancellation may have been saved by another request while the run executed.
-        db.ChangeTracker.Clear();
-        var run = await db.TestRuns.SingleAsync(x => x.Id == runId, CancellationToken.None);
-        await ApplyPersistedCountsAsync(db, run);
-
-        var now = DateTimeOffset.UtcNow;
-        if (run.Status == RunStatus.Cancelled)
-        {
-            logger.LogInformation("Simulation run {RunId} cancelled after {Completed} tests.", runId, run.CompletedTests);
-        }
-        else if (persistenceFailure is not null)
-        {
+        if (persistenceFailure is not null)
             logger.LogError(persistenceFailure, "Result persistence failed for simulation run {RunId}.", runId);
-            run.Fail(now, Summarize("Result persistence failed", persistenceFailure));
-        }
         else if (executionFailure is not null)
-        {
             logger.LogError(executionFailure, "Simulation run {RunId} failed during execution.", runId);
-            run.Fail(now, Summarize("Simulation execution failed", executionFailure));
-        }
-        else
-        {
-            run.Complete(now);
-            logger.LogInformation("Simulation run {RunId} completed with status {Status}.", runId, run.Status);
-        }
 
-        await db.SaveChangesAsync(CancellationToken.None);
-        await PublishSafelyAsync(publisher, ToProgress(run, null));
+        // The terminal decision is re-made from fresh state on every attempt: a cancellation saved by another
+        // request (detected through the rowversion token) always wins over completion.
+        for (var attempt = 1; ; attempt++)
+        {
+            db.ChangeTracker.Clear();
+            var run = await db.TestRuns.SingleAsync(x => x.Id == runId, CancellationToken.None);
+            await ApplyPersistedCountsAsync(db, run);
+
+            var now = DateTimeOffset.UtcNow;
+            string logMessage;
+            var level = LogLevel.Information;
+            if (run.Status == RunStatus.Cancelled)
+            {
+                logMessage = $"Run cancelled after {run.CompletedTests:N0} of {run.TotalTests:N0} tests.";
+            }
+            else if (persistenceFailure is not null)
+            {
+                run.Fail(now, Summarize("Result persistence failed", persistenceFailure));
+                (logMessage, level) = (run.ErrorSummary!, LogLevel.Error);
+            }
+            else if (executionFailure is not null)
+            {
+                run.Fail(now, Summarize("Simulation execution failed", executionFailure));
+                (logMessage, level) = (run.ErrorSummary!, LogLevel.Error);
+            }
+            else
+            {
+                run.Complete(now);
+                logMessage = $"Run completed with status {run.Status}: {run.PassedCount:N0} passed, {run.FailedCount:N0} failed, {run.SkippedCount:N0} skipped.";
+            }
+
+            try
+            {
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < MaxSaveAttempts)
+            {
+                logger.LogInformation("Simulation run {RunId} changed concurrently while finishing; re-evaluating.", runId);
+                continue;
+            }
+
+            logger.LogInformation("Simulation run {RunId} finished with status {Status}.", runId, run.Status);
+            await WriteLogAsync(db, runId, level, logMessage);
+            await PublishSafelyAsync(publisher, ToProgress(run, null));
+            return;
+        }
+    }
+
+    /// <summary>Run-level diagnostic entry; failures to log never affect the run itself.</summary>
+    private async Task WriteLogAsync(CQPulseDbContext db, Guid runId, LogLevel level, string message)
+    {
+        try
+        {
+            db.ExecutionLogs.Add(new ExecutionLog { TestRunId = runId, Level = level, Message = message });
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Could not write execution log for run {RunId}.", runId);
+            db.ChangeTracker.Clear();
+        }
     }
 
     private async Task TryMarkFailedAsync(Guid runId, string summary)
@@ -235,12 +286,25 @@ internal sealed class SimulationWorker(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<CQPulseDbContext>();
-            var run = await db.TestRuns.SingleOrDefaultAsync(x => x.Id == runId);
-            if (run is null || run.Status.IsTerminal()) return;
-            await ApplyPersistedCountsAsync(db, run);
-            run.Fail(DateTimeOffset.UtcNow, summary);
-            await db.SaveChangesAsync();
-            await PublishSafelyAsync(scope.ServiceProvider.GetRequiredService<IRunProgressPublisher>(), ToProgress(run, null));
+            for (var attempt = 1; ; attempt++)
+            {
+                db.ChangeTracker.Clear();
+                var run = await db.TestRuns.SingleOrDefaultAsync(x => x.Id == runId);
+                if (run is null || run.Status.IsTerminal()) return;
+                await ApplyPersistedCountsAsync(db, run);
+                run.Fail(DateTimeOffset.UtcNow, summary);
+                try
+                {
+                    await db.SaveChangesAsync();
+                }
+                catch (DbUpdateConcurrencyException) when (attempt < MaxSaveAttempts)
+                {
+                    continue;
+                }
+                await WriteLogAsync(db, runId, LogLevel.Error, summary);
+                await PublishSafelyAsync(scope.ServiceProvider.GetRequiredService<IRunProgressPublisher>(), ToProgress(run, null));
+                return;
+            }
         }
         catch (Exception exception)
         {

@@ -28,6 +28,8 @@ if (string.IsNullOrWhiteSpace(jwtOptions.SigningKey) || jwtOptions.SigningKey.Le
     throw new InvalidOperationException("Configure a 32-character-or-longer Jwt:SigningKey through user secrets.");
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.AddScoped<TokenService>();
+var loginRateLimit = builder.Configuration.GetSection(LoginRateLimit.SectionName).Get<LoginRateLimit>() ?? new LoginRateLimit();
+builder.Services.AddRateLimiter(options => LoginRateLimit.Configure(options, loginRateLimit));
 builder.Services.AddAuthorization();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -70,6 +72,7 @@ app.UseHttpsRedirection();
 app.UseCors("client");
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<RunsHub>("/hubs/runs");
 // Liveness: the process is up. Readiness: dependencies (the database) are reachable.

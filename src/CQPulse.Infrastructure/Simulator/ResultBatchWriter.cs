@@ -31,6 +31,16 @@ internal sealed class EfResultBatchWriter(IServiceScopeFactory scopeFactory) : I
         var dbContext = scope.ServiceProvider.GetRequiredService<CQPulseDbContext>();
         await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         dbContext.TestCaseResults.AddRange(batch);
+        // One diagnostic entry per failed test, saved atomically with its result.
+        dbContext.ExecutionLogs.AddRange(batch.Where(x => x.Outcome == TestOutcome.Failed).Select(x => new ExecutionLog
+        {
+            TestRunId = runId,
+            TestCaseResultId = x.Id,
+            TimestampUtc = x.CompletedAtUtc,
+            Level = LogLevel.Error,
+            Message = $"{x.TestCaseNameSnapshot} failed: {x.ErrorMessage}",
+            MetadataJson = x.FailureCategory is { } category ? $$"""{"failureCategory":"{{category}}","durationMs":{{x.DurationMs}}}""" : null
+        }));
         await dbContext.SaveChangesAsync(cancellationToken);
         await dbContext.TestRuns.Where(x => x.Id == runId).ExecuteUpdateAsync(setters => setters
             .SetProperty(x => x.CompletedTests, x => x.CompletedTests + batch.Count)

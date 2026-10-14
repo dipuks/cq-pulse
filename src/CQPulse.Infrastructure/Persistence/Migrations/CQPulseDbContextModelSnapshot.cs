@@ -218,6 +218,11 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                     b.Property<string>("RequestedByUserId")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<string>("RunLabel")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -241,6 +246,11 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TestSuiteId");
+
+                    b.HasIndex("ProjectId", "TestSuiteId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_TestRuns_ActiveTarget")
+                        .HasFilter("[Status] IN (0, 1)");
 
                     b.HasIndex("ProjectId", "Status", "RequestedAtUtc");
 

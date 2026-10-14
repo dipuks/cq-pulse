@@ -136,11 +136,13 @@ public sealed class SimulatorExecutionTests(ApiFixture fixture)
     {
         using var client = await fixture.CreateAdministratorClientAsync();
         var project = await client.CreateProjectAsync();
+        var otherProject = await client.CreateProjectAsync();
         var completed = await client.RunToCompletionAsync(NewRequest(project.Id, 25));
         var (queuedId, runningId) = await fixture.WithDbContextAsync(async db =>
         {
             var queued = NewRun(project.Id, "Interrupted while queued");
-            var running = NewRun(project.Id, "Interrupted while running");
+            // Separate projects: at most one queued/running run per target is allowed (UX_TestRuns_ActiveTarget).
+            var running = NewRun(otherProject.Id, "Interrupted while running");
             running.Start(DateTimeOffset.UtcNow.AddMinutes(-1));
             db.TestRuns.AddRange(queued, running);
             await db.SaveChangesAsync();

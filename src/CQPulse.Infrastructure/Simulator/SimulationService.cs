@@ -58,7 +58,7 @@ internal sealed class SimulationService(
                  (x.Status == RunStatus.Queued || x.Status == RunStatus.Running),
             cancellationToken);
         if (activeRunExists)
-            throw new ConflictException("An active simulation already exists for this project and suite.");
+            throw new ConflictException(ActiveRunConflictMessage);
 
         var run = new TestRun
         {
@@ -73,22 +73,51 @@ internal sealed class SimulationService(
             RequestedByUserId = userId
         };
         dbContext.TestRuns.Add(run);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException exception) when (IsActiveRunIndexViolation(exception))
+        {
+            // Two submissions raced past the check above; the filtered unique index admits only one.
+            throw new ConflictException(ActiveRunConflictMessage);
+        }
         await queue.QueueAsync(run.Id, cancellationToken);
         return run.Id;
     }
 
     public async Task CancelAsync(Guid runId, CancellationToken cancellationToken)
     {
-        var run = await dbContext.TestRuns.SingleOrDefaultAsync(x => x.Id == runId, cancellationToken)
-            ?? throw new NotFoundException("The requested run does not exist.");
-        if (run.Status.IsTerminal())
-            throw new ConflictException($"The run has already finished with status {run.Status}.");
+        // The worker updates progress counters on the same row, so retry on rowversion conflicts and
+        // re-check the status each time: a run that finished meanwhile can no longer be cancelled.
+        for (var attempt = 1; ; attempt++)
+        {
+            dbContext.ChangeTracker.Clear();
+            var run = await dbContext.TestRuns.SingleOrDefaultAsync(x => x.Id == runId, cancellationToken)
+                ?? throw new NotFoundException("The requested run does not exist.");
+            if (run.Status.IsTerminal())
+                throw new ConflictException($"The run has already finished with status {run.Status}.");
 
-        run.Cancel(DateTimeOffset.UtcNow, "Cancelled by user.");
-        await dbContext.SaveChangesAsync(cancellationToken);
+            run.Cancel(DateTimeOffset.UtcNow, "Cancelled by user.");
+            try
+            {
+                await dbContext.SaveChangesAsync(cancellationToken);
+                break;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < MaxCancelAttempts)
+            {
+                await Task.Delay(attempt * 10, cancellationToken);
+            }
+        }
+
         cancellations.Cancel(runId);
     }
+
+    private const int MaxCancelAttempts = 10;
+    private const string ActiveRunConflictMessage = "An active simulation already exists for this project and suite.";
+
+    private static bool IsActiveRunIndexViolation(DbUpdateException exception) =>
+        exception.InnerException?.Message.Contains(CQPulseDbContext.ActiveRunIndexName, StringComparison.Ordinal) == true;
 
     private async Task<(string ProjectName, string? SuiteName)> ResolveTargetAsync(
         SimulationRequest request, CancellationToken cancellationToken)
