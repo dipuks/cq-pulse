@@ -30,7 +30,16 @@
       <label>Failure %<input type="number" [(ngModel)]="model.failurePercentage" name="failure" min="0" max="100"></label>
       <label>Skipped %<input type="number" [(ngModel)]="model.skippedPercentage" name="skipped" min="0" max="100"></label>
     </div>
-    <div class="two-col">
+    <label>Workload source
+      <select [(ngModel)]="model.workloadSource" name="workloadSource">
+        <option value="Catalog">Catalog test cases (enabled cases in the target)</option>
+        <option value="Synthetic">Synthetic generated tests</option>
+      </select>
+    </label>
+    @if (model.workloadSource === 'Catalog') {
+      <p class="empty">Cases run in order and repeat to reach the test count. Fixed outcomes and per-case durations come from the catalog; percentages apply to cases set to Random.</p>
+    }
+    <div class="two-col" [hidden]="model.workloadSource === 'Catalog'">
       <label>Min duration ms<input type="number" [(ngModel)]="model.minimumDurationMs" name="min" min="0"></label>
       <label>Max duration ms<input type="number" [(ngModel)]="model.maximumDurationMs" name="max" min="0" [max]="limits()?.maxDurationMs ?? null"></label>
     </div>
@@ -59,6 +68,7 @@
     @if (preview(); as p) {
       <div class="preview">
         <span>Target <b>{{ p.projectName }}{{ p.testSuiteName ? ' · ' + p.testSuiteName : ' · all suites' }}</b></span>
+        @if (p.workloadDescription) { <small>{{ p.workloadDescription }}</small> }
         <span>Tests <b>{{ p.testCount | number }}</b></span>
         <span>Passed (exact) <b>{{ p.expectedPassed | number }}</b></span>
         <span>Failed (exact) <b>{{ p.expectedFailed | number }}</b></span>

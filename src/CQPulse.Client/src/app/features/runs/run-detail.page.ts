@@ -1,7 +1,7 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, OnInit, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { problemMessage } from '../../core/errors';
 import { TEST_OUTCOMES, TestOutcome, isTerminal } from '../../core/models';
@@ -36,8 +36,20 @@ import { Pager } from '../../shared/pager';
           <div><p class="eyebrow">EXECUTION</p><h2>Configuration and timing</h2></div>
           @if (!isTerminal(r.status)) {
             <button type="button" class="secondary danger" [disabled]="cancelling()" (click)="cancel()">{{ cancelling() ? 'Cancelling…' : 'Cancel run' }}</button>
+          } @else {
+            <button type="button" class="secondary" [disabled]="rerunning()" (click)="rerun()"
+              title="Queue a new run with the same configuration and seed">{{ rerunning() ? 'Queueing…' : '↻ Rerun' }}</button>
           }
         </div>
+        @if (r.rerunOfRunId || r.rerunIds.length) {
+          <p class="empty">
+            @if (r.rerunOfRunId) { Rerun of <a [routerLink]="['/runs', r.rerunOfRunId]">the original run</a>. }
+            @if (r.rerunIds.length) {
+              Reruns:
+              @for (id of r.rerunIds; track id; let i = $index) { <a [routerLink]="['/runs', id]">#{{ i + 1 }}</a>{{ $last ? '' : ', ' }} }
+            }
+          </p>
+        }
         @if (actionError()) { <p class="error" role="alert">{{ actionError() }}</p> }
         <dl class="definition-list">
           <dt>Started</dt><dd>{{ r.startedAtUtc ? (r.startedAtUtc | date: 'medium') : '—' }}</dd>
@@ -88,6 +100,8 @@ export class RunDetailPage implements OnInit {
   protected outcome: TestOutcome | '' = '';
   protected resultsPage = 1;
   protected readonly cancelling = signal(false);
+  protected readonly rerunning = signal(false);
+  private readonly router = inject(Router);
   protected readonly actionError = signal('');
   protected readonly run = loadable(() => this.api.run(this.runId()));
   protected readonly results = loadable(() =>
@@ -108,6 +122,15 @@ export class RunDetailPage implements OnInit {
   protected goToResults(page: number): void {
     this.resultsPage = page;
     this.results.reload();
+  }
+
+  protected rerun(): void {
+    this.rerunning.set(true);
+    this.actionError.set('');
+    this.api.rerun(this.runId()).subscribe({
+      next: ({ runId }) => { this.rerunning.set(false); void this.router.navigate(['/runs', runId]); },
+      error: e => { this.rerunning.set(false); this.actionError.set(problemMessage(e, 'The run could not be rerun.')); }
+    });
   }
 
   protected cancel(): void {

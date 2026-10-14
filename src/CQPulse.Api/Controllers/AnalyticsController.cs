@@ -8,7 +8,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace CQPulse.Api.Controllers;
 
-/// <summary>Aggregates over persisted test-case results, filtered by <c>CompletedAtUtc</c>.</summary>
+/// <summary>
+/// Aggregates over persisted test-case results. Filters apply to <c>CompletedAtUtc</c> as the half-open UTC interval
+/// [fromUtc, toUtc); trend days are UTC calendar days.
+/// </summary>
 [ApiController]
 [Authorize(Roles = "Administrator")]
 [Route("api/analytics")]
@@ -79,7 +82,7 @@ public sealed class AnalyticsController(CQPulseDbContext dbContext) : Controller
     {
         var query = dbContext.TestCaseResults.AsNoTracking().AsQueryable();
         if (fromUtc is not null) query = query.Where(x => x.CompletedAtUtc >= fromUtc);
-        if (toUtc is not null) query = query.Where(x => x.CompletedAtUtc <= toUtc);
+        if (toUtc is not null) query = query.Where(x => x.CompletedAtUtc < toUtc); // exclusive: [fromUtc, toUtc)
         if (projectId is not null) query = query.Where(x => x.TestRun.ProjectId == projectId);
         return query;
     }

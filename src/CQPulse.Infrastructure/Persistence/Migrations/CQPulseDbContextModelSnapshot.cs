@@ -218,6 +218,9 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                     b.Property<string>("RequestedByUserId")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("RerunOfRunId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -244,6 +247,8 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("RerunOfRunId");
 
                     b.HasIndex("TestSuiteId");
 
@@ -544,6 +549,11 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("CQPulse.Domain.Entities.TestRun", null)
+                        .WithMany()
+                        .HasForeignKey("RerunOfRunId")
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("CQPulse.Domain.Entities.TestSuite", "TestSuite")
                         .WithMany("TestRuns")

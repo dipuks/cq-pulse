@@ -8,14 +8,22 @@ namespace CQPulse.Infrastructure.Catalog;
 
 internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogService
 {
-    public async Task<PageResponse<ProjectDto>> GetProjectsAsync(string? search, int page, int pageSize, CancellationToken cancellationToken)
+    public async Task<PageResponse<ProjectDto>> GetProjectsAsync(ProjectQuery request, CancellationToken cancellationToken)
     {
         var query = dbContext.Projects.AsNoTracking();
-        if (!string.IsNullOrWhiteSpace(search)) query = query.Where(x => x.Name.Contains(search));
+        if (!string.IsNullOrWhiteSpace(request.Search)) query = query.Where(x => x.Name.Contains(request.Search));
+        if (request.Status is not null) query = query.Where(x => x.Status == request.Status);
         var total = await query.CountAsync(cancellationToken);
-        var items = await query.OrderBy(x => x.Name).Skip((page - 1) * pageSize).Take(pageSize)
+        var ordered = request.Sort?.ToLowerInvariant() switch
+        {
+            "name-desc" => query.OrderByDescending(x => x.Name),
+            "created-desc" => query.OrderByDescending(x => x.CreatedAtUtc).ThenBy(x => x.Name),
+            "created-asc" => query.OrderBy(x => x.CreatedAtUtc).ThenBy(x => x.Name),
+            _ => query.OrderBy(x => x.Name)
+        };
+        var items = await ordered.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize)
             .Select(x => new ProjectDto(x.Id, x.Name, x.Description, x.Status, x.CreatedAtUtc)).ToListAsync(cancellationToken);
-        return new PageResponse<ProjectDto>(items, total, page, pageSize);
+        return new PageResponse<ProjectDto>(items, total, request.Page, request.PageSize);
     }
 
     public Task<ProjectDto?> GetProjectAsync(Guid projectId, CancellationToken cancellationToken) =>
@@ -47,13 +55,13 @@ internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogServi
         var query = dbContext.TestSuites.AsNoTracking().Where(x => x.ProjectId == projectId);
         var total = await query.CountAsync(cancellationToken);
         var items = await query.OrderBy(x => x.Name).Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(x => new TestSuiteDto(x.Id, x.ProjectId, x.Name, x.Description, x.TestCases.Count)).ToListAsync(cancellationToken);
+            .Select(x => new TestSuiteDto(x.Id, x.ProjectId, x.Name, x.Description, x.TestCases.Count, x.TestCases.Count(c => c.Enabled))).ToListAsync(cancellationToken);
         return new PageResponse<TestSuiteDto>(items, total, page, pageSize);
     }
 
     public Task<TestSuiteDto?> GetSuiteAsync(Guid suiteId, CancellationToken cancellationToken) =>
         dbContext.TestSuites.AsNoTracking().Where(x => x.Id == suiteId)
-            .Select(x => new TestSuiteDto(x.Id, x.ProjectId, x.Name, x.Description, x.TestCases.Count)).SingleOrDefaultAsync(cancellationToken);
+            .Select(x => new TestSuiteDto(x.Id, x.ProjectId, x.Name, x.Description, x.TestCases.Count, x.TestCases.Count(c => c.Enabled))).SingleOrDefaultAsync(cancellationToken);
 
     public async Task<TestSuiteDto?> CreateSuiteAsync(Guid projectId, SaveTestSuiteRequest request, CancellationToken cancellationToken)
     {
@@ -63,7 +71,7 @@ internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogServi
         var suite = new TestSuite { ProjectId = projectId, Name = request.Name.Trim(), Description = request.Description?.Trim() };
         dbContext.TestSuites.Add(suite);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new TestSuiteDto(suite.Id, suite.ProjectId, suite.Name, suite.Description, 0);
+        return new TestSuiteDto(suite.Id, suite.ProjectId, suite.Name, suite.Description, 0, 0);
     }
 
     public async Task<TestSuiteDto?> UpdateSuiteAsync(Guid suiteId, SaveTestSuiteRequest request, CancellationToken cancellationToken)
@@ -74,18 +82,44 @@ internal sealed class CatalogService(CQPulseDbContext dbContext) : ICatalogServi
         await EnsureUniqueSuiteNameAsync(suite.ProjectId, request.Name, suite.Id, cancellationToken);
         suite.Name = request.Name.Trim(); suite.Description = request.Description?.Trim(); suite.UpdatedAtUtc = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new TestSuiteDto(suite.Id, suite.ProjectId, suite.Name, suite.Description, suite.TestCases.Count);
+        return new TestSuiteDto(suite.Id, suite.ProjectId, suite.Name, suite.Description, suite.TestCases.Count, suite.TestCases.Count(c => c.Enabled));
     }
 
-    public async Task<PageResponse<TestCaseDto>> GetCasesAsync(Guid suiteId, string? search, int page, int pageSize, CancellationToken cancellationToken)
+    public async Task<PageResponse<TestCaseDto>> GetCasesAsync(Guid suiteId, TestCaseQuery request, CancellationToken cancellationToken)
     {
         var query = dbContext.TestCases.AsNoTracking().Where(x => x.TestSuiteId == suiteId);
-        if (!string.IsNullOrWhiteSpace(search)) query = query.Where(x => x.Name.Contains(search));
+        if (!string.IsNullOrWhiteSpace(request.Search)) query = query.Where(x => x.Name.Contains(request.Search));
+        if (request.Enabled is not null) query = query.Where(x => x.Enabled == request.Enabled);
+        if (request.Priority is not null) query = query.Where(x => x.Priority == request.Priority);
         var total = await query.CountAsync(cancellationToken);
-        var items = await query.OrderBy(x => x.Name).Skip((page - 1) * pageSize).Take(pageSize)
+        var ordered = request.Sort?.ToLowerInvariant() switch
+        {
+            "name-desc" => query.OrderByDescending(x => x.Name),
+            "priority-desc" => query.OrderByDescending(x => x.Priority).ThenBy(x => x.Name),
+            "updated-desc" => query.OrderByDescending(x => x.UpdatedAtUtc).ThenBy(x => x.Name),
+            _ => query.OrderBy(x => x.Name)
+        };
+        var items = await ordered.Skip((request.Page - 1) * request.PageSize).Take(request.PageSize)
             .Select(x => new TestCaseDto(x.Id, x.TestSuiteId, x.Name, x.Description, x.Enabled, x.Priority, x.SimulatedOutcome, x.SimulatedDurationMs))
             .ToListAsync(cancellationToken);
-        return new PageResponse<TestCaseDto>(items, total, page, pageSize);
+        return new PageResponse<TestCaseDto>(items, total, request.Page, request.PageSize);
+    }
+
+    public async Task<TestCaseDto?> SetCaseEnabledAsync(Guid caseId, bool enabled, CancellationToken cancellationToken)
+    {
+        var testCase = await dbContext.TestCases.SingleOrDefaultAsync(x => x.Id == caseId, cancellationToken);
+        if (testCase is null) return null;
+        testCase.Enabled = enabled;
+        testCase.UpdatedAtUtc = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return ToDto(testCase);
+    }
+
+    public async Task<bool> DeleteCaseAsync(Guid caseId, CancellationToken cancellationToken)
+    {
+        // Results reference the case with ON DELETE SET NULL and keep TestCaseNameSnapshot, so history is preserved.
+        var deleted = await dbContext.TestCases.Where(x => x.Id == caseId).ExecuteDeleteAsync(cancellationToken);
+        return deleted > 0;
     }
 
     public Task<TestCaseDto?> GetCaseAsync(Guid caseId, CancellationToken cancellationToken) =>

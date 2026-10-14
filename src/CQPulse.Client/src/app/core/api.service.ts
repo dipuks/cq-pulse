@@ -2,8 +2,9 @@ import { HttpClient, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { API_BASE_URL } from './api-config';
 import {
-  AnalyticsSummary, DashboardSummary, FailureCount, PageResponse, Project, RunDetail, RunLog, RunResult, RunSummary,
-  SaveProject, SaveSuite, SaveTestCase, SimulationPreview, SimulationRequest, SimulatorLimits, Suite, TestCase, TestOutcome, TrendPoint
+  AnalyticsSummary, DashboardSummary, FailureCount, PageResponse, Project, ProjectSummary, RunDetail, RunLog, RunResult, RunSummary,
+  SaveProject, SaveSuite, SaveTestCase, SimulationPreview, SimulationRequest, SimulatorLimits, Suite, TestCase, TestCaseExecution,
+  TestOutcome, TrendPoint
 } from './models';
 
 export type QueryParams = Record<string, string | number | boolean | null | undefined>;
@@ -24,6 +25,7 @@ export class ApiService {
 
   projects(query: QueryParams = {}) { return this.http.get<PageResponse<Project>>(`${this.api}/projects`, { params: toParams(query) }); }
   project(id: string) { return this.http.get<Project>(`${this.api}/projects/${id}`); }
+  projectSummary(id: string) { return this.http.get<ProjectSummary>(`${this.api}/projects/${id}/summary`); }
   saveProject(body: SaveProject, id?: string) {
     return id ? this.http.put<Project>(`${this.api}/projects/${id}`, body) : this.http.post<Project>(`${this.api}/projects`, body);
   }
@@ -40,6 +42,11 @@ export class ApiService {
     return this.http.get<PageResponse<TestCase>>(`${this.api}/suites/${suiteId}/cases`, { params: toParams(query) });
   }
   testCase(id: string) { return this.http.get<TestCase>(`${this.api}/test-cases/${id}`); }
+  setCaseEnabled(id: string, enabled: boolean) { return this.http.patch<TestCase>(`${this.api}/test-cases/${id}/enabled`, { enabled }); }
+  deleteCase(id: string) { return this.http.delete<void>(`${this.api}/test-cases/${id}`); }
+  caseHistory(id: string, query: QueryParams = {}) {
+    return this.http.get<PageResponse<TestCaseExecution>>(`${this.api}/test-cases/${id}/results`, { params: toParams(query) });
+  }
   saveCase(suiteId: string, body: SaveTestCase, id?: string) {
     return id ? this.http.put<TestCase>(`${this.api}/test-cases/${id}`, body) : this.http.post<TestCase>(`${this.api}/suites/${suiteId}/cases`, body);
   }
@@ -48,6 +55,7 @@ export class ApiService {
 
   runs(query: QueryParams = {}) { return this.http.get<PageResponse<RunSummary>>(`${this.api}/runs`, { params: toParams(query) }); }
   run(id: string) { return this.http.get<RunDetail>(`${this.api}/runs/${id}`); }
+  rerun(id: string) { return this.http.post<{ runId: string }>(`${this.api}/runs/${id}/rerun`, {}); }
   results(id: string, query: { outcome?: TestOutcome | ''; page?: number; pageSize?: number } = {}) {
     return this.http.get<PageResponse<RunResult>>(`${this.api}/runs/${id}/results`, { params: toParams(query) });
   }

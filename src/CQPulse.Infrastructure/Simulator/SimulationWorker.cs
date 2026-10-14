@@ -75,10 +75,18 @@ internal sealed class SimulationWorker(
         if (run.Status != RunStatus.Queued) return; // e.g. cancelled while waiting in the queue
 
         var request = TryReadConfiguration(run.ConfigurationSnapshot);
-        if (request is null)
+        List<CatalogCase>? cases = null;
+        if (request?.WorkloadSource == WorkloadSource.Catalog)
+            cases = await CatalogWorkloadLoader.LoadAsync(db, request.ProjectId, request.TestSuiteId, stoppingToken);
+        var unrunnable = request is null ? "The run configuration could not be read."
+            : cases is { Count: 0 } ? "The target has no enabled test cases (they were disabled or deleted after the run was queued)."
+            : null;
+        if (request is null || unrunnable is not null)
         {
-            run.Fail(DateTimeOffset.UtcNow, "The run configuration could not be read.");
+            unrunnable ??= "The run configuration could not be read.";
+            run.Fail(DateTimeOffset.UtcNow, unrunnable);
             await db.SaveChangesAsync(CancellationToken.None);
+            await WriteLogAsync(db, runId, LogLevel.Error, unrunnable);
             await PublishSafelyAsync(publisher, ToProgress(run, null));
             return;
         }
@@ -96,18 +104,18 @@ internal sealed class SimulationWorker(
         }
         await PublishSafelyAsync(publisher, ToProgress(run, null));
         await WriteLogAsync(db, runId, LogLevel.Information,
-            $"Run started: {request.TestCount:N0} tests, concurrency {request.MaxConcurrency}, seed {request.RandomSeed?.ToString() ?? "random"}.");
+            $"Run started: {request.TestCount:N0} tests ({(cases is null ? "synthetic" : $"{cases.Count:N0} catalog cases")}), concurrency {request.MaxConcurrency}, seed {request.RandomSeed?.ToString() ?? "random"}.");
         logger.LogInformation("Simulation run {RunId} started: {TestCount} tests, concurrency {Concurrency}.",
             runId, request.TestCount, request.MaxConcurrency);
 
-        var (executionFailure, persistenceFailure) = await ExecuteAsync(run, request, publisher, stoppingToken);
+        var (executionFailure, persistenceFailure) = await ExecuteAsync(run, request, cases, publisher, stoppingToken);
         stoppingToken.ThrowIfCancellationRequested();
 
         await FinishAsync(db, publisher, runId, executionFailure, persistenceFailure);
     }
 
     private async Task<(Exception? Execution, Exception? Persistence)> ExecuteAsync(
-        TestRun run, SimulationRequest request, IRunProgressPublisher publisher, CancellationToken stoppingToken)
+        TestRun run, SimulationRequest request, IReadOnlyList<CatalogCase>? cases, IRunProgressPublisher publisher, CancellationToken stoppingToken)
     {
         var runToken = cancellations.Register(run.Id, stoppingToken);
         try
@@ -120,7 +128,7 @@ internal sealed class SimulationWorker(
             });
             var persistence = PersistResultsAsync(results.Reader, execution, stoppingToken);
 
-            var workload = new SimulationWorkload(request, request.RandomSeed ?? Random.Shared.Next());
+            var workload = new SimulationWorkload(request, request.RandomSeed ?? Random.Shared.Next(), cases);
             var counters = new int[3];
             var completed = 0;
             var progressStep = Math.Max(1, run.TotalTests / Settings.ProgressUpdatesPerRun);
@@ -136,10 +144,11 @@ internal sealed class SimulationWorker(
                         var test = workload.Generate(index);
                         var startedAt = DateTimeOffset.UtcNow;
                         await Task.Delay(test.DurationMs, token);
-                        var name = $"Generated test {index + 1:N0}";
+                        var name = test.Name;
                         await results.Writer.WriteAsync(new TestCaseResult
                         {
                             TestRunId = run.Id,
+                            TestCaseId = test.TestCaseId,
                             TestCaseNameSnapshot = name,
                             Outcome = test.Outcome,
                             StartedAtUtc = startedAt,

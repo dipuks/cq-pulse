@@ -70,6 +70,9 @@ public sealed class CQPulseDbContext(DbContextOptions<CQPulseDbContext> options)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(x => x.TestSuite).WithMany(x => x.TestRuns).HasForeignKey(x => x.TestSuiteId)
                 .OnDelete(DeleteBehavior.Restrict);
+            // Rerun link: the original run cannot be deleted while reruns reference it.
+            entity.HasOne<TestRun>().WithMany().HasForeignKey(x => x.RerunOfRunId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         builder.Entity<TestCaseResult>(entity =>

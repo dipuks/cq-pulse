@@ -231,3 +231,25 @@ Precondition checked read-only on the dev DB: 0 queued/running runs, so the uniq
 | Dev DB baseline (read-only) | Unchanged; only `InitialCreate` applied; 0 test databases left |
 
 The migration was created with `--configuration Release` because the user's running API locks the Debug output.
+
+### M7 — Product workflows (2026-10-13)
+
+**Migration `AddRunRerunLink` (additive, NOT applied to the development database):** `ALTER TABLE TestRuns ADD RerunOfRunId uniqueidentifier NULL` plus an index and a self-referencing FK (no cascade).
+
+| Plan item | Delivered | Evidence |
+|---|---|---|
+| 3.5 Simulator runs real catalog cases | New `WorkloadSource` (`Catalog` is the default in the UI; `Synthetic` is still available). Enabled cases in the suite (or in all of the project's suites) run in a stable order and cycle to the test count. A fixed `SimulatedOutcome` and per-case duration are honoured; `Random` cases take exactly allocated percentages. Results carry `TestCaseId` and a name snapshot. The preview reports the exact totals, the case count and a description. A catalog target with no enabled cases → 400; cases disabled after queueing → run `Failed` with a reason. | `CatalogWorkloadTests` (order and cycling, fixed outcomes and durations, exact allocation for mixed catalogs, reproducibility); `Catalog_run_executes_real_cases_with_exact_preview_totals`; `Catalog_run_without_enabled_cases_is_rejected` |
+| 3.4 Test cases | Filters (search, enabled, priority) and sort; `PATCH /api/test-cases/{id}/enabled`; `DELETE` (results keep their snapshot, FK set to null); `GET /api/test-cases/{id}/results` (paged history with run label). UI: full create form, enable toggles, history table, delete with confirmation. | `Editing_and_deleting_a_case_preserves_its_execution_history`; `Disabling_a_case_excludes_it_from_future_runs_only` |
+| 3.7 Rerun | `POST /api/runs/{id}/rerun` re-queues the stored configuration and seed with `RerunOfRunId`. Run detail links to the original and its reruns. The runs list marks reruns. 404 for an unknown run; 409 when the target is busy. | `Rerun_creates_a_linked_run_with_the_same_configuration_and_outcomes` (identical P/F/S for the same seed); `Rerun_errors_are_reported` |
+| 3.2 Projects | `GET /api/projects` status filter and sort; `GET /api/projects/{id}/summary` (suite/case/enabled/run/active counts, result totals, pass rate, 5 recent runs). New project detail page with an inline edit form. | `Project_summary_reports_persisted_counts`; `List_filters_narrow_projects_cases_and_runs` |
+| 3.3 Suites | `enabledTestCaseCount`; suite run history through `GET /api/runs?testSuiteId=`. Suite page tabs: Overview (details + paged run history) and Test cases (filters, paging, toggles). | Same filter test |
+| 3.7/3.8 Filters | Runs: project, status, label, UTC date range, sort, paging. Analytics: project and UTC date range. **Both API ranges are now half-open `[fromUtc, toUtc)`**; the UI's inclusive end date maps to the next UTC midnight. | `AnalyticsTests` (empty dataset, multiple runs, exact boundaries at UTC midnight, failed/skipped, category counts excluding uncategorized failures, 33.3% rounding, project isolation, runs without suite/seed); client `dates.spec`, analytics filter spec |
+| 3.1 Dashboard | 30-day stacked trend chart (SVG + hidden data table), failure categories, recent runs, queued/running runs; metric captions distinguish unique catalog cases from executed results | `trend-chart.spec` |
+
+| Command | Result |
+|---|---|
+| `dotnet test CQPulse.slnx --artifacts-path <scratch>` | ✅ Unit 51/51, Integration 65/65 |
+| `npx ng build` | ✅ initial 302.85 kB |
+| `npx ng test --watch=false` | ✅ 36/36 |
+| `dotnet ef migrations has-pending-model-changes` | ✅ none |
+| Dev DB (read-only) | Unchanged; still only `InitialCreate` applied |

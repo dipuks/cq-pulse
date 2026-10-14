@@ -162,7 +162,8 @@ public sealed class SimulatorExecutionTests(ApiFixture fixture)
         Assert.Equal(RunStatus.Failed, runningAfter.Status);
         Assert.Contains("interrupted", runningAfter.ErrorSummary, StringComparison.OrdinalIgnoreCase);
         Assert.NotNull(runningAfter.CompletedAtUtc);
-        Assert.Equal(completed, completedAfter);
+        Assert.Equal(completed.RerunIds, completedAfter.RerunIds); // lists compare by content
+        Assert.Equal(completed with { RerunIds = [] }, completedAfter with { RerunIds = [] });
     }
 
     [Fact]

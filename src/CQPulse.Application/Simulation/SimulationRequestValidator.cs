@@ -30,6 +30,7 @@ public static class SimulationRequestValidator
             .AddIf(request.FailurePercentage > 0 && categories.Count == 0, nameof(request.FailureCategories),
                 "At least one failure category is required when failures are configured.")
             .AddIf(categories.Any(x => !Enum.IsDefined(x)), nameof(request.FailureCategories), "Unknown failure category.")
+            .AddIf(!Enum.IsDefined(request.WorkloadSource), nameof(request.WorkloadSource), "Unknown workload source.")
             .AddIf(request.RunLabel?.Trim().Length > MaxRunLabelLength, nameof(request.RunLabel),
                 $"Run label must not exceed {MaxRunLabelLength} characters.")
             .ThrowIfAny();

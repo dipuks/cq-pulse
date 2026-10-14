@@ -20,6 +20,7 @@ describe('AnalyticsPage', () => {
   function render() {
     const fixture = TestBed.createComponent(AnalyticsPage);
     fixture.detectChanges();
+    backend.expectOne(r => r.url === '/api/projects').flush({ items: [], totalCount: 0, page: 1, pageSize: 100 });
     return fixture;
   }
 
@@ -32,7 +33,8 @@ describe('AnalyticsPage', () => {
 
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('Cannot reach the CQ Pulse API');
-    expect(text).not.toContain('No persisted outcomes');
+    expect(text).not.toContain('No persisted results match');
+    expect(text).not.toContain('No results in this range');
     expect((fixture.nativeElement as HTMLElement).querySelectorAll('.state-error button').length).toBe(3);
   });
 
@@ -46,7 +48,7 @@ describe('AnalyticsPage', () => {
     fixture.detectChanges();
 
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
-    expect(text).toContain('No persisted outcomes yet');
+    expect(text).toContain('No persisted results match these filters.');
     expect(text).not.toContain('Loading…');
   });
 

@@ -5,6 +5,8 @@ public sealed class TestRun
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid ProjectId { get; set; }
     public Guid? TestSuiteId { get; set; }
+    /// <summary>Set when this run was created by re-running another run with the same configuration.</summary>
+    public Guid? RerunOfRunId { get; set; }
     public required string RunLabel { get; set; }
     public RunStatus Status { get; private set; } = RunStatus.Queued;
     public DateTimeOffset RequestedAtUtc { get; set; } = DateTimeOffset.UtcNow;

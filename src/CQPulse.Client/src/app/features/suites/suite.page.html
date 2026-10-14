@@ -1,0 +1,98 @@
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">SUITE</p>
+    <h1>{{ suite.value()?.name || 'Test suite' }}</h1>
+    @if (suite.value(); as s) {
+      <p class="intro">{{ s.testCaseCount | number }} test cases · {{ s.enabledTestCaseCount | number }} enabled{{ s.description ? ' · ' + s.description : '' }}</p>
+    }
+  </div>
+  @if (suite.value(); as s) { <a [routerLink]="['/projects', s.projectId, 'suites']">← Suites</a> }
+</section>
+<app-data-state [loading]="suite.loading()" [loaded]="suite.loaded()" [error]="suite.error()" (retry)="suite.reload()" />
+
+<nav class="tabs" aria-label="Suite sections">
+  <a [routerLink]="['/suites', suiteId()]" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Overview</a>
+  <a [routerLink]="['/suites', suiteId(), 'cases']" routerLinkActive="active">Test cases</a>
+</nav>
+
+@if (view() === 'overview') {
+  <section class="split">
+    @if (suite.value()) {
+      <form class="panel form" (ngSubmit)="saveSuite()">
+        <h2>Suite details</h2>
+        <label>Name<input [(ngModel)]="details.name" name="suiteName" required maxlength="200"></label>
+        <label>Description<textarea [(ngModel)]="details.description" name="suiteDescription" maxlength="2000"></textarea></label>
+        @if (suiteMessage()) { <p [class]="suiteSaved() ? 'empty' : 'error'" role="status">{{ suiteMessage() }}</p> }
+        <button class="primary" type="submit" [disabled]="!details.name.trim()">Save suite</button>
+      </form>
+    }
+    <article class="panel">
+      <div class="panel-title"><div><p class="eyebrow">EXECUTION HISTORY</p><h2>Runs targeting this suite</h2></div></div>
+      @for (run of runs.value()?.items ?? []; track run.id) {
+        <div class="row">
+          <a [routerLink]="['/runs', run.id]">{{ run.runLabel }}</a>
+          <span class="status" [attr.data-status]="run.status">{{ run.status }}</span>
+          <span>{{ run.passedCount | number }}✓ {{ run.failedCount | number }}✗ · {{ run.requestedAtUtc | date: 'short' }}</span>
+        </div>
+      }
+      <app-data-state [loading]="runs.loading()" [loaded]="runs.loaded()" [error]="runs.error()" [empty]="!runs.value()?.items?.length"
+        emptyText="No runs have targeted this suite yet." (retry)="runs.reload()" />
+      <app-pager [page]="runPage" [pageSize]="10" [totalCount]="runs.value()?.totalCount ?? 0" (pageChange)="goToRuns($event)" />
+    </article>
+  </section>
+} @else {
+  <section class="split">
+    <form class="panel form" (ngSubmit)="addCase()">
+      <h2>New test case</h2>
+      <label>Name<input [(ngModel)]="draft.name" name="caseName" required maxlength="200"></label>
+      <label>Description<textarea [(ngModel)]="draft.description" name="caseDescription" maxlength="4000"></textarea></label>
+      <div class="two-col">
+        <label>Priority
+          <select [(ngModel)]="draft.priority" name="priority">@for (p of priorities; track p) { <option [value]="p">{{ p }}</option> }</select>
+        </label>
+        <label>Simulated outcome
+          <select [(ngModel)]="draft.simulatedOutcome" name="outcome">@for (o of outcomes; track o) { <option [value]="o">{{ o }}</option> }</select>
+        </label>
+      </div>
+      <label>Duration (ms)<input type="number" [(ngModel)]="draft.simulatedDurationMs" name="duration" min="0" max="60000"></label>
+      <label class="check"><input type="checkbox" [(ngModel)]="draft.enabled" name="enabled"> Enabled</label>
+      @if (caseError()) { <p class="error" role="alert">{{ caseError() }}</p> }
+      <button class="primary" type="submit" [disabled]="!draft.name.trim()">Create case</button>
+    </form>
+    <article class="panel">
+      <div class="filters">
+        <label>Search<input [(ngModel)]="search" (ngModelChange)="applyFilters()" placeholder="Case name"></label>
+        <label>State
+          <select [(ngModel)]="enabled" (ngModelChange)="applyFilters()"><option value="">All</option><option value="true">Enabled</option><option value="false">Disabled</option></select>
+        </label>
+        <label>Priority
+          <select [(ngModel)]="priority" (ngModelChange)="applyFilters()">
+            <option value="">All</option>@for (p of priorities; track p) { <option [value]="p">{{ p }}</option> }
+          </select>
+        </label>
+        <label>Sort
+          <select [(ngModel)]="sort" (ngModelChange)="applyFilters()">
+            <option value="name">Name</option><option value="priority-desc">Priority</option><option value="updated-desc">Recently updated</option>
+          </select>
+        </label>
+      </div>
+      @if (rowError()) { <p class="error" role="alert">{{ rowError() }}</p> }
+      <div class="table-row heading"><span>Test case</span><span>Priority</span><span>Outcome</span><span>Enabled</span></div>
+      @for (testCase of cases.value()?.items ?? []; track testCase.id) {
+        <div class="table-row">
+          <strong><a [routerLink]="['/test-cases', testCase.id]">{{ testCase.name }}</a><small>{{ testCase.simulatedDurationMs | number }} ms{{ testCase.description ? ' · ' + testCase.description : '' }}</small></strong>
+          <span>{{ testCase.priority }}</span>
+          <span>{{ testCase.simulatedOutcome }}</span>
+          <label class="toggle">
+            <input type="checkbox" [checked]="testCase.enabled" [disabled]="busyCaseId() === testCase.id" (change)="toggle(testCase)"
+              [attr.aria-label]="(testCase.enabled ? 'Disable ' : 'Enable ') + testCase.name">
+            {{ testCase.enabled ? 'Enabled' : 'Disabled' }}
+          </label>
+        </div>
+      }
+      <app-data-state [loading]="cases.loading()" [loaded]="cases.loaded()" [error]="cases.error()" [empty]="!cases.value()?.items?.length"
+        emptyText="No test cases match these filters." (retry)="cases.reload()" />
+      <app-pager [page]="casePage" [pageSize]="pageSize" [totalCount]="cases.value()?.totalCount ?? 0" (pageChange)="goToCases($event)" />
+    </article>
+  </section>
+}

@@ -15,7 +15,7 @@ import { RunLiveConnection } from './run-live-connection';
 export const defaultRequest = (): SimulationRequest => ({
   projectId: '', testSuiteId: null, testCount: 100, maxConcurrency: 12, minimumDurationMs: 20, maximumDurationMs: 90,
   passPercentage: 88, failurePercentage: 8, skippedPercentage: 4, failureCategories: [...FAILURE_CATEGORIES],
-  randomSeed: null, runLabel: 'Simulator run'
+  randomSeed: null, runLabel: 'Simulator run', workloadSource: 'Catalog'
 });
 
 /** Client-side checks mirroring the server validator, using the limits the API reports. */
