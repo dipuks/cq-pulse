@@ -1,141 +1,183 @@
 # CQ Pulse — Cloud QA
 
-[![CI](https://github.com/dipuks/cq-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/dipuks/cq-pulse/actions/workflows/ci.yml)
+[![CI](https://github.com/dipuks/cq-pulse/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dipuks/cq-pulse/actions/workflows/ci.yml)
 
-*See every run. Know every risk.*
+**CQ Pulse is a test management and quality-intelligence platform that runs deterministic, simulated test workloads, streams their progress live, and turns the results into explainable insights.**
 
-CQ Pulse is a test management and quality intelligence platform built with .NET 10, Angular 22 and SQL Server. You organize projects, suites and test cases, run large workloads with live progress, and turn the persisted results into analytics and explainable insights. It shows which failures recur, which tests look flaky, which days are anomalous, and which failure to investigate first.
+.NET 10 · ASP.NET Core · EF Core · SQL Server · SignalR · Angular 22
 
-> **Execution is simulated.** CQ Pulse does not drive real browsers or test frameworks. Its simulator produces deterministic, reproducible workloads of up to 50,000 tests per run, so that persistence, real-time updates, analytics and integrations can be built and verified at realistic scale.
+![CQ Pulse dashboard: catalog, run and pass-rate metrics, 30-day execution trend, failure categories and recent runs](docs/images/dashboard.png)
 
-## What it does
+> **Execution is simulated.** CQ Pulse does not launch browsers, test frameworks or external test workloads. Its server-side simulator generates seeded, reproducible results (up to 50,000 tests per run) so that persistence, live updates, analytics and integrations work at realistic scale.
 
-1. **Organize:** projects → suites → test cases, with priorities, enable/disable, search, filters and paging. Every result keeps a snapshot of its test name, so execution history survives edits and deletions.
-2. **Run:** preview the exact pass/fail/skip totals before queueing, then run real catalog cases (fixed or randomized outcomes, per-case durations) or a synthetic workload. Progress is live over SignalR, with REST polling as the authoritative fallback, and shows elapsed time and throughput. The same seed reproduces the same run; cancel and rerun are linked in the history.
-3. **Analyze:** a dashboard, trends and failure categories over UTC-consistent windows. Run history has server-side filters, sorting and paging; run detail shows configuration, timing, every test result and the execution logs.
-4. **Understand:** the Insights page groups failures into signatures (category + normalized message), finds flaky-test candidates and flags anomalous days against a statistical baseline. Every finding shows its rule and its evidence. Nothing is forecast.
-5. **Triage (optional):** runs that finish with failures are sent to [LogTriageAssistant](https://github.com/dipuks/LogTriageAssistant). It returns a severity, categorized findings with redacted evidence, and suggested next steps.
-6. **Decide (optional):** a separate SmartDog decision service ranks the run's failure signatures by occurrences, 30-day recurrence, affected test cases and triage severity. The ranking is a transparent weighted sum: every score comes with its per-criterion breakdown. Missing evidence is left out with the reason, never counted as zero.
+## Features
 
-## How the pieces fit
+- **Test catalog:** projects, suites and test cases with priorities, enable/disable, search and paging. Results keep a snapshot of the test name, so history survives edits and deletions.
+- **Deterministic runs:** preview the exact pass/fail/skip totals before queueing; run catalog cases (fixed or random outcomes, per-case durations) or synthetic workloads. The same seed reproduces the same run; runs can be cancelled and rerun.
+- **Live progress:** SignalR pushes progress to the browser, and REST polling remains the authoritative fallback.
+- **Analytics and insights:** trends and failure categories over UTC windows; recurring failure signatures, flaky-test candidates and anomalous days, each shown with its rule and evidence. Nothing is forecast.
+- **Failure triage (optional):** failed runs are analysed by [LogTriageAssistant](https://github.com/dipuks/LogTriageAssistant), which returns a severity, findings with redacted evidence, and next steps.
+- **Decision support (optional):** SmartDog ranks a run's failure signatures to show what to investigate first, with a per-criterion breakdown of every score.
+- **Resilient integrations:** if either service is down, CQ Pulse keeps working and records the outage with its reason instead of inventing results.
+
+## Screenshots
+
+All screenshots were captured from a local instance running simulated workloads.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/live-run.png" alt="Simulator page with a 20,000-test catalog run in progress: live counts, elapsed time and throughput"><br><b>Live execution.</b> SignalR progress while a 20,000-test catalog run executes.</td>
+    <td width="50%"><img src="docs/images/insights.png" alt="Insights page with anomaly rules, recurring failure signatures and flaky-test candidates"><br><b>Quality insights.</b> Failure signatures, flaky candidates and anomaly rules, each with its evidence.</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/failure-triage.png" alt="Failure triage panel with LogTriageAssistant severity, signal score, next steps and findings"><br><b>Failure triage.</b> LogTriageAssistant's severity, findings and suggested next steps for a run.</td>
+    <td width="50%"><img src="docs/images/decision-support.png" alt="Decision support panel ranking four failure signatures with scores and a per-criterion breakdown"><br><b>Decision support.</b> SmartDog's ranking with each score's per-criterion contributions.</td>
+  </tr>
+</table>
+
+## Architecture
 
 ```mermaid
-flowchart LR
-    U[Browser<br/>Angular 22] -- REST + SignalR --> API[CQ Pulse API<br/>.NET 10]
-    API --> DB[(SQL Server)]
-    API -- failed results, CSRF + cookie --> LTA[LogTriageAssistant<br/>log triage]
-    API -- signature evidence, API key --> SD[SmartDog<br/>weighted ranking]
+flowchart TB
+    ui["Angular 22 client (browser)"]
+    proxy["Angular dev proxy<br/>npm start, development only"]
+
+    subgraph api["CQ Pulse API"]
+        rest["ASP.NET Core controllers<br/>/api/*"]
+        hub["SignalR hub<br/>/hubs/runs"]
+        sim["Simulation worker<br/>bounded run queue"]
+        analysis["Analysis worker"]
+        decision["Decision support"]
+    end
+
+    db[("SQL Server")]
+    lta["LogTriageAssistant API<br/>POST /api/analyze"]
+    sd["SmartDog evaluation API<br/>POST /api/decisions/evaluate"]
+
+    ui -->|"HTTPS /api"| proxy
+    ui <-->|"WebSocket /hubs"| proxy
+    proxy --> rest
+    proxy <--> hub
+    rest -->|"queue run"| sim
+    sim -.->|"live progress"| hub
+    rest -->|"rank request"| decision
+    sim -->|"run finished"| analysis
+    analysis -->|"failures as JSONL"| lta
+    lta -.->|"severity and findings"| analysis
+    decision -->|"criteria and options"| sd
+    sd -.->|"ranking and contributions"| decision
+    rest & sim & analysis & decision --> db
 ```
 
-The three applications stay independent, with separate repositories, storage and UIs. CQ Pulse talks to the other two only over HTTP, with timeouts, bounded retries, a circuit breaker and correlation ids. If either service is down, CQ Pulse keeps working: it records the outage as *Unavailable* with the reason and never shows invented results. (The SmartDog evaluation API that CQ Pulse calls is not yet published on GitHub.)
+Solid arrows are requests and dotted arrows are responses or pushed updates. In development the Angular proxy gives the browser a single origin. In other setups the client is served from the API's host, or calls the API directly with CORS.
 
-## Engineering highlights
+- **CQ Pulse** (this repository) orchestrates simulated test runs, stores every result, pushes live progress and computes analytics and insights.
+- **LogTriageAssistant** analyses the failure log that CQ Pulse sends and returns severity, findings with redacted evidence, and next steps.
+- **SmartDog** ranks options against weighted criteria and returns each score's per-criterion contributions. Its evaluation API is deterministic and uses no language model. That API is not yet published on GitHub.
 
-- **Correctness under load:** bounded queues and channels with backpressure, and batched persistence in which run counters always equal persisted rows. Also optimistic concurrency with `rowversion`, a filtered unique index that allows one active run per target, and startup recovery. Measured at 1k, 10k and 50k tests with a peak managed heap under 40 MB ([performance](docs/performance.md)).
-- **Security:** ASP.NET Core Identity with JWT; the Administrator role guards every data endpoint and the SignalR hub. Lockout and per-IP sign-in rate limiting; secrets only in user secrets or environment variables.
-- **API design:** RFC 7807 Problem Details with validation errors keyed by field, idempotent analysis requests (SHA-256 input digest), and correlation ids propagated to both services.
-- **Tests:** 66 unit and 109 integration tests against real SQL Server, each run in a temporary database. Also 50 Angular tests, contract-based test doubles for both integrations, opt-in performance tests, and CI on GitHub Actions with a SQL Server service container. End-to-end, offline and browser verification against the real services is recorded in the [feature audit](docs/feature-audit.md).
+The three services run as independent processes with their own storage, and communicate only through HTTPS APIs. CQ Pulse calls them with timeouts, bounded retries, a circuit breaker and correlation ids. More detail: [architecture](docs/architecture.md) and [integration design](docs/quality-intelligence-architecture.md).
 
-## Tech stack
+## Quality and verification
 
-| Layer | Technology |
-|---|---|
-| API | .NET 10, ASP.NET Core, EF Core 10, ASP.NET Core Identity + JWT, SignalR, `Microsoft.Extensions.Http.Resilience` |
-| Client | Angular 22 (standalone components, signals, lazy routes), Vitest |
-| Data | SQL Server (Express or LocalDB locally, a container in CI) |
-| Testing | xUnit, `WebApplicationFactory`, GitHub Actions |
+- **Tests:** 66 unit tests and 109 integration tests against real SQL Server (each run uses a temporary database), plus 50 Angular tests. GitHub Actions runs them on every push to `main`.
+- **Integrations:** contract-based test doubles cover outages, timeouts, rejected credentials and malformed responses. End-to-end, service-offline and browser checks against the real services are recorded in the [feature audit](docs/feature-audit.md).
+- **Performance:** a 50,000-test run completes in about 17–19 s with a peak managed heap under 40 MB on a developer machine ([performance](docs/performance.md)).
+- **Reliability:** bounded queues and channels with backpressure, batched persistence (run counters always equal stored rows), optimistic concurrency, one active run per target, and startup recovery.
 
-Documentation: [architecture](docs/architecture.md) · [quality intelligence integration](docs/quality-intelligence-architecture.md) · [performance](docs/performance.md) · [feature audit](docs/feature-audit.md) · [implementation plan](docs/implementation-plan.md)
+## Getting started
 
-## Local prerequisites
+### Prerequisites
 
-- .NET SDK 10
+- .NET 10 SDK and the EF Core tool (`dotnet tool install --global dotnet-ef`)
 - Node.js 24+
-- SQL Server Express or SQL Server LocalDB
+- SQL Server Express or LocalDB
+- A trusted HTTPS development certificate (`dotnet dev-certs https --trust`)
 
-## Run locally
+### Run CQ Pulse
 
-The local connection string is intentionally stored outside source control. For SQL Express:
+Secrets live in user secrets or environment variables, never in `appsettings*.json` or source control. Use your own values:
 
 ```powershell
 dotnet user-secrets set 'ConnectionStrings:CQPulse' 'Server=.\SQLEXPRESS;Database=CQPulse;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True' --project src\CQPulse.Api
-dotnet user-secrets set 'Jwt:SigningKey' '<a-random-32-character-minimum-key>' --project src\CQPulse.Api
+dotnet user-secrets set 'Jwt:SigningKey' '<random key, at least 32 characters>' --project src\CQPulse.Api
 dotnet user-secrets set 'DevelopmentAdmin:Email' 'you@example.test' --project src\CQPulse.Api
-dotnet user-secrets set 'DevelopmentAdmin:Password' '<a-strong-local-development-password>' --project src\CQPulse.Api
-dotnet ef database update --project src\CQPulse.Infrastructure --startup-project src\CQPulse.Api
-dotnet run --project src\CQPulse.Api --launch-profile https
+dotnet user-secrets set 'DevelopmentAdmin:Password' '<strong local password>' --project src\CQPulse.Api
+
+dotnet ef database update --project src\CQPulse.Infrastructure --startup-project src\CQPulse.Api   # also after pulling new versions
+dotnet run --project src\CQPulse.Api --launch-profile https                                       # https://localhost:7256
 ```
 
-In another terminal:
+In a second terminal:
 
 ```powershell
 Set-Location src\CQPulse.Client
 npm install
-npm start
+npm start          # http://localhost:4200; proxies /api, /hubs (WebSockets) and /health to the API
 ```
 
-Open `http://localhost:4200`. The API listens on `https://localhost:7256`; `npm start` proxies `/api`, `/hubs` (including SignalR WebSockets) and `/health` to it (`src/CQPulse.Client/proxy.conf.json`), so the browser talks to a single origin in development. Start the API first; if it is not running, the sign-in page reports that the API cannot be reached.
+Sign in with the development administrator, which is seeded only in the Development environment.
 
-For other hosting setups, serve the client from the same host as the API, or set the `API_BASE_URL` injection token (`src/app/core/api-config.ts`) to the API origin and add the client origin to `Cors:AllowedOrigins`.
+### Connect LogTriageAssistant (optional)
 
-### Running all three applications
-
-LogTriageAssistant and SmartDog are optional. CQ Pulse works without them and shows each one's state under **Settings → Connected services**. One-time configuration (accounts and API keys) is described in [Failure triage](#failure-triage-with-logtriageassistant-optional) and [Decision support](#decision-support-with-smartdog-optional). Before the first run:
-
-- **Trust the development certificate** (`dotnet dev-certs https --trust`). All three services use HTTPS on localhost, and CQ Pulse's server-side calls to the other two fail on an untrusted certificate.
-- **Build LogTriageAssistant's web UI** if you want to use it directly (`npm install` and `npm run build` in its folder; see its README). CQ Pulse only uses its API.
-- **Apply CQ Pulse migrations** (`dotnet ef database update`, as above) after pulling new versions.
-
-Recommended startup order: LogTriageAssistant, SmartDog, the CQ Pulse API, then the client. Start each in its own terminal:
+1. Start LogTriageAssistant over HTTPS (its session cookie is Secure-only): `dotnet run --launch-profile https` serves `https://localhost:7291`.
+2. Register a dedicated account for CQ Pulse in LogTriageAssistant (its sign-up page or `POST /api/auth/register`).
+3. Give CQ Pulse the URL and that account, then restart the API:
 
 ```powershell
-# 1. LogTriageAssistant (https://localhost:7291). HTTPS is required: its session cookie is Secure-only.
-Set-Location C:\Projects\LogTriageAssistant
-dotnet run --launch-profile https
-
-# 2. SmartDog (https://localhost:7018). Needs DecisionApi:ApiKeys:0 in its user secrets.
-Set-Location C:\Projects\SmartDog
-dotnet run --project SmartDog.Api --launch-profile https
-
-# 3. CQ Pulse API (https://localhost:7256), then the client (http://localhost:4200) in a fourth terminal
-Set-Location C:\Projects\CQPulse
-dotnet run --project src\CQPulse.Api --launch-profile https
-Set-Location C:\Projects\CQPulse\src\CQPulse.Client
-npm start
+dotnet user-secrets set 'Integrations:LogTriage:BaseUrl' 'https://localhost:7291' --project src\CQPulse.Api
+dotnet user-secrets set 'Integrations:LogTriage:Username' '<service account>' --project src\CQPulse.Api
+dotnet user-secrets set 'Integrations:LogTriage:Password' '<service account password>' --project src\CQPulse.Api
 ```
 
-The order is a convenience, not a requirement: CQ Pulse checks the other services on demand and records an outage as *Unavailable* with the reason. Services started later are picked up without restarting the API. Configuration changes (user secrets) do need an API restart.
+Runs that finish with failures are analysed automatically (`Integrations:LogTriage:AutoAnalyzeFailedRuns`, default `true`). Runs can also be analysed from **Run detail → Failure triage**. Failed or unavailable analyses can be retried without re-running the workload.
 
-## Verification
+### Connect SmartDog (optional)
+
+Generate one API key and configure it on both sides (this assumes the repositories are cloned side by side), then restart both:
 
 ```powershell
-dotnet test CQPulse.slnx --filter "Category!=Performance"                  # 66 unit + 109 integration tests
-dotnet test tests\CQPulse.IntegrationTests --filter "Category=Performance"   # opt-in workload measurements (docs/performance.md)
-Set-Location src\CQPulse.Client
-npm run build
-npm test -- --watch=false                                                  # 50 client tests
+$key = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+dotnet user-secrets set 'DecisionApi:ApiKeys:0' $key --project ..\SmartDog\SmartDog.Api
+dotnet user-secrets set 'Integrations:SmartDog:BaseUrl' 'https://localhost:7018' --project src\CQPulse.Api
+dotnet user-secrets set 'Integrations:SmartDog:ApiKey' $key --project src\CQPulse.Api
+Remove-Variable key
 ```
 
-The other two services have their own suites:
+**Run detail → Decision support** ranks the run's failure signatures by four criteria:
+
+| Criterion | Default weight |
+|---|---:|
+| Occurrences in the run | 0.35 |
+| 30-day project recurrence | 0.25 |
+| Affected catalog test cases | 0.15 |
+| LogTriageAssistant triage severity | 0.25 |
+
+Weights can be adjusted per request. A criterion without trustworthy evidence is left out with the reason shown, never counted as zero. The evidence rules are in [integration design §6](docs/quality-intelligence-architecture.md#6-decision-support-evidence-rules).
+
+### Start all three services
+
+The recommended order is LogTriageAssistant, SmartDog, the CQ Pulse API, then the client, each in its own terminal from its own repository:
 
 ```powershell
-Set-Location C:\Projects\SmartDog;            dotnet test SmartDog.slnx   # 49 tests: evaluator and decision API
-Set-Location C:\Projects\LogTriageAssistant;  dotnet test Tests           # 57 tests (browser tests: npm run test:e2e, see its README)
+dotnet run --launch-profile https                          # LogTriageAssistant → https://localhost:7291
+dotnet run --project SmartDog.Api --launch-profile https   # SmartDog           → https://localhost:7018
+dotnet run --project src\CQPulse.Api --launch-profile https   # CQ Pulse API    → https://localhost:7256
+npm start                                                  # CQ Pulse client (src\CQPulse.Client) → http://localhost:4200
 ```
 
-The integrations are tested against HTTP test doubles that follow each service's contract (`FakeLogTriageHandler`, `FakeSmartDogHandler`), including outages, timeouts, rejected credentials, validation errors and malformed responses. The end-to-end checks against the real services are recorded in [feature-audit.md](docs/feature-audit.md).
+The order is a convenience, not a requirement. CQ Pulse checks the other services on demand, and **Settings → Connected services** shows each one as NotConfigured, Healthy or Unavailable with the reason. Services started later are picked up automatically; changed secrets need an API restart.
 
-### Integration tests
-
-`tests/CQPulse.IntegrationTests` hosts the real API in memory (`WebApplicationFactory`, environment `Testing`, so user secrets and development seeders are not loaded). Each test collection gets its own temporary database named `CQPulse_Tests_<guid>`, migrated on start and dropped on finish, including when tests fail. The development `CQPulse` database is never used: database management is restricted to names matching `CQPulse_Tests_<32 hex>`. Test databases left behind by a killed test run are removed on the next run once they are older than 6 hours.
-
-By default the tests connect to `.\SQLEXPRESS` with Windows authentication. To use another server, set a **server-level** connection string (no database name):
+## Tests
 
 ```powershell
-$env:CQPULSE_TEST_SQL = 'Server=localhost,1433;User Id=sa;Password=<password>;TrustServerCertificate=True'
+dotnet test CQPulse.slnx --filter "Category!=Performance"                    # 66 unit + 109 integration tests
+dotnet test tests\CQPulse.IntegrationTests --filter "Category=Performance"   # opt-in workload measurements
+Set-Location src\CQPulse.Client; npm test -- --watch=false; npm run build    # 50 client tests, production build
 ```
 
-Tests get users through `ApiFixture`: `CreateAdministratorClientAsync()`, `CreateClientAsync(fixture.NonAdministrator)` (authenticated, no role → 403 on data endpoints), and `CreateAnonymousClient()`. Each fixture creates its users with random passwords and signs them in through the real `/api/auth/login` endpoint.
+Integration tests host the real API in memory and create a temporary `CQPulse_Tests_<guid>` database per test collection. That database is dropped afterwards, and the development database is never touched. To use another SQL Server, set `CQPULSE_TEST_SQL` to a server-level connection string (no database name).
+
+The other services have their own suites: `dotnet test SmartDog.slnx` in SmartDog (49 tests) and `dotnet test Tests` in LogTriageAssistant (57 tests).
 
 ## Configuration reference
 
@@ -143,72 +185,14 @@ Tests get users through `ApiFixture`: `CreateAdministratorClientAsync()`, `Creat
 |---|---|---|
 | `ConnectionStrings:CQPulse`, `Jwt:SigningKey` (≥ 32 chars) | user secrets / environment | Required to start the API |
 | `DevelopmentAdmin:Email`, `DevelopmentAdmin:Password` | user secrets | Seeds an Administrator in the Development environment only |
+| `Integrations:LogTriage:BaseUrl`, `Username`, `Password` | user secrets / environment | Optional failure triage |
+| `Integrations:SmartDog:BaseUrl`, `ApiKey` | user secrets / environment | Optional decision support. `AttemptTimeoutSeconds` (10), `RetryCount` (2) and `RetryBaseDelayMilliseconds` (300) can also be set |
 | `Simulator:*` | `appsettings.json` | Limits and tuning (max tests, concurrency, durations, queue, batch size) |
 | `RateLimiting:Login:PermitLimit` / `WindowSeconds` | `appsettings.json` | Sign-in attempts per client IP (default 10 per 60 s) |
 | `Cors:AllowedOrigins` | `appsettings.json` | Only needed when the client is served from another origin |
-| `Integrations:LogTriage:*` | user secrets / environment | Optional failure triage (see below) |
-| `Integrations:SmartDog:BaseUrl`, `ApiKey` | user secrets / environment | Optional decision support (see below). `AttemptTimeoutSeconds` (10), `RetryCount` (2) and `RetryBaseDelayMilliseconds` (300) can also be set |
-| `Logging:Console:IncludeScopes` | environment / `appsettings.Development.json` | `true` shows the `CorrelationId`, `RunId` and `AnalysisId` scopes in console logs |
+| `Logging:Console:IncludeScopes` | environment | `true` shows the `CorrelationId`, `RunId` and `AnalysisId` scopes in console logs |
 
-Environment variables use `__` as the separator, e.g. `ConnectionStrings__CQPulse`.
-
-## Current limitations
-
-- Execution is **simulated**; there is no real test runner.
-- The run and analysis queues are in-process (one API instance). Restarts are handled by recovery (interrupted runs are marked failed; pending analyses are re-queued), but there is no distributed worker.
-- One global Administrator role; no project-level membership or multi-tenant isolation.
-- The JWT is stored in browser `localStorage` and there are no refresh tokens.
-- SmartDog's scores prioritize the observed evidence (counts and severities already recorded). They are not predictions, and they are relative to the submitted signatures and weights.
-- Ranking is limited to 25 failure signatures per run (the most frequent); a note says when a run has more.
-- Triage severity is based on a sample of at most 2,000 failures per run (the LogTriageAssistant document limit), analysed by LogTriageAssistant's keyword rules. When a run has more failures, the evidence notes say so.
-- Project recurrence is counted exactly in memory. If a project has more than 10,000 distinct failure messages in the last 30 days, ranking is refused (409) rather than undercounted.
-- SmartDog's separate conversational (chat) workflow requires a local Ollama model and has **not been verified** as part of this work. CQ Pulse uses only SmartDog's structured evaluation API.
-- Automatic analyses get their own correlation id: the id of the request that queued the run is not stored on the run. LogTriageAssistant receives the header but does not log it (it is used unchanged).
-
-## Failure triage with LogTriageAssistant (optional)
-
-CQ Pulse can send a run's persisted failures to a separately running [LogTriageAssistant](https://github.com/dipuks/LogTriageAssistant) for diagnostic analysis (severity, categorized findings with redacted evidence, suggested next steps). Nothing in LogTriageAssistant changes: CQ Pulse uses its existing API with a dedicated account.
-
-1. Start LogTriageAssistant over HTTPS (its session cookie is Secure-only), e.g. its `https` profile on `https://localhost:7291`.
-2. Register a dedicated account in LogTriageAssistant for CQ Pulse (sign-up page or `POST /api/auth/register`).
-3. Configure CQ Pulse with user secrets (never in appsettings files):
-
-```powershell
-dotnet user-secrets set 'Integrations:LogTriage:BaseUrl' 'https://localhost:7291' --project src\CQPulse.Api
-dotnet user-secrets set 'Integrations:LogTriage:Username' '<lta-service-account>' --project src\CQPulse.Api
-dotnet user-secrets set 'Integrations:LogTriage:Password' '<lta-service-password>' --project src\CQPulse.Api
-```
-
-Runs that finish with failures are analysed automatically (`Integrations:LogTriage:AutoAnalyzeFailedRuns`, default `true`), or from **Run detail → Failure triage**. Analyses are asynchronous and never change a run. If the service is down, the analysis is recorded as *Unavailable* with the reason and can be retried without re-running the workload. **Settings → Connected services** shows whether each integration is configured and reachable.
-
-## Decision support with SmartDog (optional)
-
-**Run detail → Decision support** asks a separately running SmartDog decision service (its evaluation API is not yet published on GitHub) which of a finished run's failure signatures to investigate first. CQ Pulse uses SmartDog's structured `POST /api/decisions/evaluate` endpoint, which is deterministic and uses no language model or machine learning. The contract is documented in SmartDog's README.
-
-1. Give SmartDog an API key and CQ Pulse the same key (user secrets on both sides, never in appsettings files):
-
-```powershell
-$key = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-dotnet user-secrets set 'DecisionApi:ApiKeys:0' $key --project C:\Projects\SmartDog\SmartDog.Api
-dotnet user-secrets set 'Integrations:SmartDog:BaseUrl' 'https://localhost:7018' --project src\CQPulse.Api
-dotnet user-secrets set 'Integrations:SmartDog:ApiKey' $key --project src\CQPulse.Api
-Remove-Variable key
-```
-
-2. Start SmartDog (`dotnet run --project SmartDog.Api --launch-profile https`) and restart the CQ Pulse API.
-
-**Evidence.** Each failure signature in the run is one option. A signature is the failure category plus the normalized message, as on the Insights page.
-
-| Criterion | Default weight | Source |
-|---|---:|---|
-| Occurrences in this run | 0.35 | Failed results in the run with this signature (exact) |
-| Project recurrence (30 days) | 0.25 | Failed results with this signature in the project over the last 30 UTC days, this run included (exact; 0 when there are none) |
-| Affected catalog test cases | 0.15 | Distinct catalog test cases in the run that failed with this signature (0 for synthetic workloads) |
-| Triage severity | 0.25 | Highest LogTriageAssistant finding severity on the signature's lines (INFO 1, MEDIUM 2, HIGH 3, CRITICAL 4) |
-
-Triage severity is used only if the run's latest successful analysis was made from exactly the run's current failure data and covers every ranked signature. Otherwise the criterion is left out for all options and the reason is shown. Weights can be changed per request (relative values, > 0 and ≤ 1000), and *minimum occurrences* is sent as a hard constraint.
-
-The panel shows the ranking and each score's per-criterion breakdown (value, normalized value × weight, contribution). It also shows SmartDog's notes, method and limitations, the evidence submitted, and the evaluation history. Each signature links to its failed results. Every request is stored with its evidence, correlation id and outcome. If SmartDog is down, misconfigured or rejects the request, the evaluation is recorded as *Unavailable* or *Failed* with the reason and **no ranking is shown**; the rest of CQ Pulse is unaffected.
+Environment variables use `__` as the separator, for example `ConnectionStrings__CQPulse`.
 
 ## Troubleshooting
 
@@ -216,17 +200,36 @@ Start with **Settings → Connected services**, which checks each configured ser
 
 | Symptom | Cause and fix |
 |---|---|
-| Sign-in page: *Cannot reach the CQ Pulse API* | The API is not running or not on `https://localhost:7256`. Start it first, then check `https://localhost:7256/health` (and `/health/ready` for the database). |
-| API fails at startup mentioning the connection string or `Jwt:SigningKey` | Set `ConnectionStrings:CQPulse` and a signing key of at least 32 characters in user secrets ([Run locally](#run-locally)). |
-| *Invalid object name* errors after updating | Pending migrations: run `dotnet ef database update --project src\CQPulse.Infrastructure --startup-project src\CQPulse.Api`. |
-| A service shows **NotConfigured** | Its `Integrations:*` settings are missing. Set them in user secrets and restart the API. |
-| *Unreachable: No connection could be made…* | The service is not running, or `BaseUrl` has the wrong host or port. LogTriageAssistant's https profile is `https://localhost:7291` and SmartDog's is `https://localhost:7018`. |
-| *Unreachable: timed out waiting for a response* | No answer within 5 seconds. On Windows a stopped localhost service can also appear this way, because refused connections are retried. Check that the service is running. |
-| *The SSL connection could not be established* | The development certificate is not trusted: run `dotnet dev-certs https --trust` and restart the services. |
-| Analysis **Failed**: *LogTriageAssistant rejected the configured service account credentials.* | The account does not exist in that LogTriageAssistant instance, or the username or password differ. Register the account in LogTriageAssistant and update `Integrations:LogTriage:Username/Password`. Its session cookie is HTTPS-only, so use its https profile. |
-| Decision **Failed**: *SmartDog rejected the configured API key (401).* | `Integrations:SmartDog:ApiKey` does not match any SmartDog `DecisionApi:ApiKeys:N`. Set the same value on both sides and restart both. |
+| Sign-in page: *Cannot reach the CQ Pulse API* | The API is not running or not on `https://localhost:7256`. Start it first, then check `/health` (and `/health/ready` for the database). |
+| API fails at startup naming `ConnectionStrings:CQPulse` or `Jwt:SigningKey` | Set both in user secrets (the signing key needs at least 32 characters). |
+| *Invalid object name* errors after updating | Pending migrations: run the `dotnet ef database update` command above. |
+| A service shows **NotConfigured** | Its `Integrations:*` settings are missing. Set them and restart the API. |
+| *Unreachable: No connection could be made…* | The service is not running, or `BaseUrl` has the wrong host or port (LogTriageAssistant `https://localhost:7291`, SmartDog `https://localhost:7018`). |
+| *Unreachable: timed out waiting for a response* | No answer within 5 seconds. On Windows a stopped localhost service can also appear this way, because refused connections are retried. |
+| *The SSL connection could not be established* | Trust the development certificate (`dotnet dev-certs https --trust`) and restart the services. |
+| Analysis **Failed**: *LogTriageAssistant rejected the configured service account credentials.* | The account does not exist in that LogTriageAssistant instance, or the credentials differ. Register it and update the secrets; use LogTriageAssistant's https profile. |
+| Decision **Failed**: *SmartDog rejected the configured API key (401).* | CQ Pulse's `Integrations:SmartDog:ApiKey` does not match any SmartDog `DecisionApi:ApiKeys:N`. |
 | Decision **Unavailable**: *SmartDog returned 503* while SmartDog shows Healthy | SmartDog has no `DecisionApi:ApiKeys` configured; its decision API fails closed until one is set. |
-| Evidence note: *Triage severity was not used: …* | No successful analysis exists, or it was made from different failure data. Analyse (or retry) the run under **Failure triage**, then rank again. |
+| Evidence note: *Triage severity was not used: …* | There is no successful analysis, or it was made from different failure data. Analyse or retry the run under **Failure triage**, then rank again. |
 | Ranking refused (409): *more than 10,000 distinct failure messages* | Recurrence cannot be counted exactly for that project (see limitations). |
-| No ranking offered | Decision support needs a finished run with at least one failed result. |
-| Correlation ids missing from console logs | Set `Logging__Console__IncludeScopes=true` for CQ Pulse and SmartDog. LogTriageAssistant does not log CQ Pulse's correlation id. |
+
+## Limitations
+
+- Test execution is simulated; there is no real test runner.
+- Run and analysis queues are in-process (one API instance), with startup recovery but no distributed workers.
+- One global Administrator role; the JWT is kept in browser `localStorage` without refresh tokens.
+- SmartDog's scores prioritize observed evidence; they are not predictions, and they are relative to the submitted signatures and weights.
+- Ranking is limited to 25 failure signatures per run (the most frequent).
+- Triage severity is based on a sample of at most 2,000 failures per run (the LogTriageAssistant document limit); the evidence notes say when a run has more.
+- Ranking is refused rather than undercounted when a project has more than 10,000 distinct failure messages in 30 days.
+- SmartDog's separate chat workflow requires a local Ollama model and has not been verified; CQ Pulse uses only the structured evaluation API.
+
+Verified results and remaining unverified items are listed in the [feature audit](docs/feature-audit.md).
+
+## Documentation
+
+- [Architecture](docs/architecture.md): layers, simulator pipeline, cross-cutting concerns
+- [Integration design](docs/quality-intelligence-architecture.md): service contracts, reliability rules, decision-support evidence rules
+- [Performance](docs/performance.md): measured 1k, 10k and 50k runs
+- [Feature audit](docs/feature-audit.md): current verification status, test results and the development log
+- [Implementation plan](docs/implementation-plan.md): historical milestone plan

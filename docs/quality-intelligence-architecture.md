@@ -1,5 +1,7 @@
 # Quality Intelligence Architecture
 
+Related: [README](../README.md) (overview, setup, troubleshooting) · [architecture](architecture.md) · [performance](performance.md) · [feature audit](feature-audit.md)
+
 Status: implemented and verified end to end on 2026-10-14. The LogTriageAssistant integration (Q2), historical insights (Q3) and SmartDog decision support (Q4) are complete. The design decisions are recorded in §8.
 
 CQ Pulse is the user-facing application. LogTriageAssistant and SmartDog stay independent applications in their own folders and repositories, with their own UIs, storage and release cycles. CQ Pulse talks to them only over HTTP, through the contracts below. No code or domain logic is copied between them.
@@ -110,7 +112,7 @@ Each failure signature in the run is one option; at most 25 (the most frequent i
 
 ## 9. Operations and limitations
 
-Setup, configuration, startup order, credentials, test commands and troubleshooting for all three services are in the [README](../README.md#running-all-three-applications).
+Setup, configuration, startup order, credentials, test commands and troubleshooting for all three services are in the README: [getting started](../README.md#getting-started), [tests](../README.md#tests) and [troubleshooting](../README.md#troubleshooting).
 
 | Service | Local URL (https profile) | Credentials CQ Pulse needs | Test command |
 |---|---|---|---|

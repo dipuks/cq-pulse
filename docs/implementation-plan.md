@@ -1,5 +1,7 @@
 # CQ Pulse Implementation Plan
 
+> **Historical planning document.** All phases below are complete (see [status](#status-on-2026-10-14-all-phases-complete)). For the current verification status see the [feature audit](feature-audit.md); for setup see the [README](../README.md).
+
 Updated 2026-10-13. Sources: the evidence in [feature-audit.md](feature-audit.md) and the *CQ Pulse Product Requirements and Technical Specification* (the "spec"; section numbers below refer to it).
 
 The goal is a reliable, portfolio-quality application. Existing working code (layering, the `TestRun` state machine, bounded queue, batched persistence with short-lived contexts, startup recovery, result-name snapshots, analytics projections) is kept and fixed in place, not rewritten. Framework versions stay as installed (.NET 10, EF Core 10.0.12, Angular 22, Vitest).

@@ -1,6 +1,10 @@
 # Architecture
 
-CQ Pulse is a layered .NET 10 API with an Angular 22 client and SQL Server. It integrates optionally with separately deployed services over HTTP (see [quality-intelligence-architecture.md](quality-intelligence-architecture.md)).
+CQ Pulse is a layered .NET 10 API with an Angular 22 client and SQL Server. It integrates optionally with LogTriageAssistant and SmartDog, which run as separate services and are called over HTTPS.
+
+Related: [README](../README.md) (overview, setup, troubleshooting) · [integration design](quality-intelligence-architecture.md) · [performance](performance.md) · [feature audit](feature-audit.md) (verification status)
+
+The diagram below shows the API's internal components. The system-level view of all three services is in the [README](../README.md#architecture).
 
 ```mermaid
 flowchart LR
@@ -48,6 +52,19 @@ Measured behaviour: [performance.md](performance.md).
 - **Observability:** `X-Correlation-ID` per request (accepted or generated, echoed, in the log scope, stored on analyses and decision evaluations, forwarded to integrations). Logs carry run, analysis and correlation ids as message-template scopes, visible in console output with `Logging:Console:IncludeScopes=true`. `/health` (liveness) and `/health/ready` (database). Optional integrations are reported separately at `/api/integrations/status`.
 - **Live progress:** SignalR messages count executed tests, while REST returns persisted counters (written in batches of 500). The simulator page keeps the newer live value when a REST snapshot lags, so progress never moves backwards; a terminal snapshot is authoritative.
 - **Time:** all timestamps are stored as UTC `DateTimeOffset`. Filters use half-open UTC ranges `[fromUtc, toUtc)`, and daily aggregates use UTC calendar days.
+
+## Testing
+
+| Suite | Scope |
+|---|---|
+| `tests/CQPulse.UnitTests` (66) | `TestRun` state machine, synthetic and catalog workload generation with exact allocation, request validation, insight rules and failure-signature normalization |
+| `tests/CQPulse.IntegrationTests` (109) | The real API hosted in memory (`WebApplicationFactory`, environment `Testing`, so no user secrets or development seeders) against SQL Server |
+| `src/CQPulse.Client` (50, Vitest) | Authentication guard and interceptor, error and date handling, the analytics, insights, simulator and run-detail pages, triage and decision panels, and the trend chart |
+
+- **Databases:** each integration test collection creates a temporary `CQPulse_Tests_<guid>` database, migrates it and drops it afterwards, even when tests fail. Database management only accepts names matching `^CQPulse_Tests_[0-9a-f]{32}$`, so the development database is never touched. Orphans from killed runs are removed once they are more than 6 hours old. Set `CQPULSE_TEST_SQL` to a server-level connection string (no database name) to use another server; CI uses a SQL Server container this way.
+- **Users:** `ApiFixture` creates an Administrator and an authenticated user without a role, both with random passwords, and signs them in through the real `/api/auth/login` endpoint.
+- **Integrations:** `FakeLogTriageHandler` and `FakeSmartDogHandler` implement each service's HTTP contract and can simulate outages, timeouts, rejected credentials, validation errors and malformed responses.
+- **Performance:** `PerformanceTests` (`Category=Performance`) is opt-in and excluded from the default run ([performance.md](performance.md)).
 
 ## Known limits
 

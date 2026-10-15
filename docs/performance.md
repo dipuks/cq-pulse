@@ -1,5 +1,7 @@
 # Simulator Performance
 
+Related: [README](../README.md) · [architecture](architecture.md#simulator-pipeline) (how the pipeline works) · [feature audit](feature-audit.md) (all verification results)
+
 Measured 2026-10-13 with `PerformanceTests` (`tests/CQPulse.IntegrationTests/PerformanceTests.cs`, trait `Category=Performance`):
 
 ```powershell

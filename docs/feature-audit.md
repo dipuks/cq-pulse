@@ -1,10 +1,45 @@
 # CQ Pulse Feature Audit
 
+How CQ Pulse was verified. The current status comes first. The dated log below it keeps the evidence from each milestone, starting with the initial audit of the code before any fixes.
+
+Related: [README](../README.md) · [architecture](architecture.md) · [integration design](quality-intelligence-architecture.md) · [performance](performance.md)
+
+## Current status (2026-10-14)
+
+### Verified
+
+| Area | Result | Evidence |
+|---|---|---|
+| Release build | ✅ `dotnet build CQPulse.slnx -c Release`: 0 warnings, 0 errors. Angular production build succeeds (initial bundle 303.95 kB) | [Release-readiness pass](#release-readiness-pass-2026-10-14-evening), [portfolio pass](#portfolio-and-documentation-pass-2026-10-14) |
+| Automated tests | ✅ 66 unit, 109 integration (real SQL Server, temporary databases) and 50 client tests, locally on the Release build and in GitHub Actions | Same sections |
+| Continuous integration | ✅ GitHub Actions workflow `CI` (`.github/workflows/ci.yml`): `backend` job with a SQL Server service container, and a `frontend` job. Passed for `409c093` and `44cb0da` | Runs 38665530212 and 38665944654 |
+| Catalog, simulator, run history, analytics, insights | ✅ Exact previewed totals, deterministic seeds, rerun, filters, insight rules | Integration tests (M3–M7, Q3); end-to-end runs |
+| Live progress | ✅ SignalR through the dev proxy (WebSockets) and REST fallback; the browser view never moves backwards | `RealtimeTests`; [release verification](#release-verification-2026-10-14) in headless Edge |
+| Failure triage (LogTriageAssistant) | ✅ Automatic analysis, deduplication, retry without re-running, per-signature severity | `FailureAnalysisTests`; end-to-end against the real service |
+| Decision support (SmartDog) | ✅ Real SmartDog ranking, recomputed independently from the submitted evidence; missing evidence left out with the reason | `DecisionSupportTests`; [Q4](#q4--smartdog-decision-support-2026-10-14) and release verification |
+| Dependency outages | ✅ Either or both services down: runs, dashboard and readiness keep working; failures are recorded as *Unavailable* with the reason; recovery after restart | Offline checks (API and browser) |
+| Migrations and data preservation | ✅ All 5 migrations applied to the development database after verified backups and a rehearsal; data fingerprint identical before and after | [Q4 migration table](#q4--smartdog-decision-support-2026-10-14) |
+| Performance | ✅ 1k, 10k and 50k-test runs with exact totals; peak managed heap under 40 MB | [performance.md](performance.md) |
+| Secrets | ✅ Pattern and exact-value scans of the files and full history: no secrets; no database files tracked | [Release verification](#release-verification-2026-10-14) |
+
+### Not verified
+
+- Browsers other than Microsoft Edge (Chromium, headless).
+- SmartDog's conversational workflow, which needs a local Ollama model. CQ Pulse does not use it.
+- Hosting outside a local developer machine. The Release build and `dotnet publish` output were produced but not deployed.
+- Concurrent runs, remote or cloud SQL latency, and many simultaneous browser connections ([performance.md](performance.md#not-measured)).
+
+Known limitations are listed in the [README](../README.md#limitations).
+
+## Initial audit (2026-10-13, before any fixes)
+
+> **Historical.** This section describes the code as first audited, before milestone M1. Every defect it lists was fixed later: build and styling in M1; hangs, error mapping, seeds and cancellation counters in M3; SignalR and silent client failures in M4; the cancel/complete race in M5; execution logs in M5; catalog-driven simulation in M7. See the [milestone log](#milestone-log).
+
 Audit date: 2026-10-13. Branch `main` at `563f1c9` ("Implement routed CQ Pulse frontend"), with two uncommitted client changes (`src/app/pages.ts`, `src/styles.scss`).
 
 This audit was read-only: no application source was edited, no migration was applied, no data was changed, and no service was started or restarted. Database figures come from `SELECT`-only queries against the local development database. Secrets are referred to by key name only.
 
-## Status legend
+### Status legend
 
 | Status | Meaning |
 |---|---|
@@ -14,7 +49,7 @@ This audit was read-only: no application source was edited, no migration was app
 | Missing | Not present |
 | Broken | Present but fails, or provably misbehaves |
 
-## Runtime state at audit time
+### Runtime state at audit time
 
 | Item | Finding |
 |---|---|
@@ -23,7 +58,7 @@ This audit was read-only: no application source was edited, no migration was app
 | User secrets (keys only) | `ConnectionStrings:CQPulse`, `Jwt:SigningKey`, `DevelopmentAdmin:Email`, `DevelopmentAdmin:Password` are all configured. |
 | Database | Local SQL Express, integrated authentication, migration `20261011132614_InitialCreate` applied. `dotnet ef migrations has-pending-model-changes` reports no drift. |
 
-### Database contents (verified)
+#### Database contents (verified)
 
 The figures reported earlier (26 runs and 24,125 results: 19,281 passed, 3,699 failed, 1,145 skipped, 3,699 categorized failures) **match exactly**.
 
@@ -37,7 +72,7 @@ The figures reported earlier (26 runs and 24,125 results: 19,281 passed, 3,699 f
 
 For every run, `TotalTests = CompletedTests = Passed + Failed + Skipped = persisted result rows`. Results span 2026-10-11 (23,925) and 2026-10-12 (200).
 
-## Feature status
+### Feature status
 
 | Feature | Status | Evidence | Known defects / gaps | Missing tests |
 |---|---|---|---|---|
@@ -67,7 +102,7 @@ For every run, `TotalTests = CompletedTests = Passed + Failed + Skipped = persis
 | CI | Partially implemented | `.github/workflows/ci.yml` builds and tests .NET and builds Angular. | Does not run `ng test`. Would fail right now if the uncommitted Sass change were pushed. | — |
 | Documentation | Partially implemented | README, architecture, this audit, implementation plan. | No API reference, screenshots, demo script, or seeded demo data story for recruiters. | — |
 
-## Highest-risk defects
+### Highest-risk defects
 
 1. **Frontend does not build** (Sass `@use` order). Blocks every UI change and CI.
 2. **Routed pages are unstyled at `HEAD`** (design system scoped to `App`).
@@ -78,7 +113,7 @@ For every run, `TotalTests = CompletedTests = Passed + Failed + Skipped = persis
 7. **Cancel/complete race** and unsaved counters on cancelled runs.
 8. **Non-reproducible seeded runs.**
 
-## Commands executed during this audit
+### Commands executed during this audit
 
 | Command | Result |
 |---|---|
@@ -445,3 +480,34 @@ Tracked `appsettings*.json` files contain no credentials, and the final E2E serv
 The first browser attempt timed out on the run page. The browser log showed SignalR's "page is being frozen" warning: headless Edge had frozen the tab. The harness now disables background freezing and throttling; rerun with 0 freeze warnings and all checks passed. No application error was logged.
 
 Development database fingerprint after the pass: identical to the pre-migration fingerprint. LogTriageAssistant: still 27 uncommitted entries, `App_Data/logtriage.db` unchanged.
+
+### Portfolio and documentation pass (2026-10-14)
+
+Documentation and screenshots only; no application code, schema or configuration changed.
+
+| Check | Command | Result |
+|---|---|---|
+| Release build | `dotnet build CQPulse.slnx -c Release` | ✅ 0 warnings, 0 errors |
+| Backend tests | `dotnet test CQPulse.slnx -c Release --no-build --filter "Category!=Performance"` | ✅ Unit 66/66, Integration 109/109; 0 test databases left |
+| Angular production build | `npm run build` (default configuration `production`) | ✅ No warnings; initial bundle 303.95 kB (84.55 kB transferred) |
+| Client tests | `npm test -- --watch=false` | ✅ 50/50 in 11 files |
+| CI badge | `…/actions/workflows/ci.yml/badge.svg?branch=main` | ✅ HTTP 200; workflow `CI` at `.github/workflows/ci.yml` is active and reports "passing" |
+| Mermaid | Every `mermaid` block in the README and `docs/` parsed and rendered with mermaid 10.9.3 and 11.4.1 in headless Edge | ✅ 2 diagrams, no errors |
+| Links | Relative links, images and `#anchors` in the README and `docs/`, checked with GitHub's heading-slug rules | ✅ All valid |
+| Secrets and database files | Pattern scan of the changes; no `*.db`, `*.mdf`, `*.ldf` or `*.bak` files tracked; PNG files carry no metadata chunks | ✅ None found |
+
+**How the screenshots were produced.** `docs/images/*.png` were captured with headless Microsoft Edge at 1440 px from the running application.
+
+- **Database:** an isolated `CQPulse_Tests_<guid>` database, restored from the verified development backup with the latest migration applied.
+- **Services:** real LogTriageAssistant and SmartDog processes, with scratch storage and credentials.
+- **Data:** the "Checkout Service" project, its cases and its runs were created through the API and the UI; the ranking was requested from the run page.
+
+The database, credentials and browser profiles were removed afterwards, and the development database fingerprint is unchanged.
+
+**Documentation changes.**
+
+- The README was rewritten for a first-time reader: summary, features, screenshots, architecture diagram, quality summary, setup, tests, configuration, troubleshooting and limitations.
+- The README diagram was redrawn top-to-bottom to show the dev proxy, SignalR, the workers and the request and response directions. The previous diagram rendered correctly on GitHub, but it did not show those parts.
+- This audit now opens with the current status, and the initial audit is marked as historical.
+- `architecture.md` gained a Testing section, which replaces the test-harness detail removed from the README.
+- All documents now link to each other.
