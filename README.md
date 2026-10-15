@@ -80,7 +80,13 @@ For other hosting setups, serve the client from the same host as the API, or set
 
 ### Running all three applications
 
-LogTriageAssistant and SmartDog are optional. CQ Pulse works without them and shows each one's state under **Settings → Connected services**. One-time configuration is described in [Failure triage](#failure-triage-with-logtriageassistant-optional) and [Decision support](#decision-support-with-smartdog-optional). Then start each in its own terminal:
+LogTriageAssistant and SmartDog are optional. CQ Pulse works without them and shows each one's state under **Settings → Connected services**. One-time configuration (accounts and API keys) is described in [Failure triage](#failure-triage-with-logtriageassistant-optional) and [Decision support](#decision-support-with-smartdog-optional). Before the first run:
+
+- **Trust the development certificate** (`dotnet dev-certs https --trust`). All three services use HTTPS on localhost, and CQ Pulse's server-side calls to the other two fail on an untrusted certificate.
+- **Build LogTriageAssistant's web UI** if you want to use it directly (`npm install` and `npm run build` in its folder; see its README). CQ Pulse only uses its API.
+- **Apply CQ Pulse migrations** (`dotnet ef database update`, as above) after pulling new versions.
+
+Recommended startup order: LogTriageAssistant, SmartDog, the CQ Pulse API, then the client. Start each in its own terminal:
 
 ```powershell
 # 1. LogTriageAssistant (https://localhost:7291). HTTPS is required: its session cookie is Secure-only.
@@ -98,7 +104,7 @@ Set-Location C:\Projects\CQPulse\src\CQPulse.Client
 npm start
 ```
 
-The start order only matters for convenience: CQ Pulse checks the other services on demand and records an outage as *Unavailable* with the reason.
+The order is a convenience, not a requirement: CQ Pulse checks the other services on demand and records an outage as *Unavailable* with the reason. Services started later are picked up without restarting the API. Configuration changes (user secrets) do need an API restart.
 
 ## Verification
 
@@ -108,6 +114,13 @@ dotnet test tests\CQPulse.IntegrationTests --filter "Category=Performance"   # o
 Set-Location src\CQPulse.Client
 npm run build
 npm test -- --watch=false                                                  # 50 client tests
+```
+
+The other two services have their own suites:
+
+```powershell
+Set-Location C:\Projects\SmartDog;            dotnet test SmartDog.slnx   # 49 tests: evaluator and decision API
+Set-Location C:\Projects\LogTriageAssistant;  dotnet test Tests           # 57 tests (browser tests: npm run test:e2e, see its README)
 ```
 
 The integrations are tested against HTTP test doubles that follow each service's contract (`FakeLogTriageHandler`, `FakeSmartDogHandler`), including outages, timeouts, rejected credentials, validation errors and malformed responses. The end-to-end checks against the real services are recorded in [feature-audit.md](docs/feature-audit.md).
@@ -145,9 +158,11 @@ Environment variables use `__` as the separator, e.g. `ConnectionStrings__CQPuls
 - The run and analysis queues are in-process (one API instance). Restarts are handled by recovery (interrupted runs are marked failed; pending analyses are re-queued), but there is no distributed worker.
 - One global Administrator role; no project-level membership or multi-tenant isolation.
 - The JWT is stored in browser `localStorage` and there are no refresh tokens.
-- Decision-support scores are relative to the submitted signatures and weights. They rank the evidence; they are not predictions. At most 25 signatures (the most frequent in the run) are ranked.
+- SmartDog's scores prioritize the observed evidence (counts and severities already recorded). They are not predictions, and they are relative to the submitted signatures and weights.
+- Ranking is limited to 25 failure signatures per run (the most frequent); a note says when a run has more.
+- Triage severity is based on a sample of at most 2,000 failures per run (the LogTriageAssistant document limit), analysed by LogTriageAssistant's keyword rules. When a run has more failures, the evidence notes say so.
 - Project recurrence is counted exactly in memory. If a project has more than 10,000 distinct failure messages in the last 30 days, ranking is refused (409) rather than undercounted.
-- Triage severity reflects LogTriageAssistant's keyword analysis of at most 2,000 failures per run (the document limit). When a run has more, the evidence notes say so.
+- SmartDog's separate conversational (chat) workflow requires a local Ollama model and has **not been verified** as part of this work. CQ Pulse uses only SmartDog's structured evaluation API.
 - Automatic analyses get their own correlation id: the id of the request that queued the run is not stored on the run. LogTriageAssistant receives the header but does not log it (it is used unchanged).
 
 ## Failure triage with LogTriageAssistant (optional)
@@ -194,3 +209,24 @@ Remove-Variable key
 Triage severity is used only if the run's latest successful analysis was made from exactly the run's current failure data and covers every ranked signature. Otherwise the criterion is left out for all options and the reason is shown. Weights can be changed per request (relative values, > 0 and ≤ 1000), and *minimum occurrences* is sent as a hard constraint.
 
 The panel shows the ranking and each score's per-criterion breakdown (value, normalized value × weight, contribution). It also shows SmartDog's notes, method and limitations, the evidence submitted, and the evaluation history. Each signature links to its failed results. Every request is stored with its evidence, correlation id and outcome. If SmartDog is down, misconfigured or rejects the request, the evaluation is recorded as *Unavailable* or *Failed* with the reason and **no ranking is shown**; the rest of CQ Pulse is unaffected.
+
+## Troubleshooting
+
+Start with **Settings → Connected services**, which checks each configured service live and shows the reason for any failure. Failed analyses and decision evaluations keep their error on **Run detail**.
+
+| Symptom | Cause and fix |
+|---|---|
+| Sign-in page: *Cannot reach the CQ Pulse API* | The API is not running or not on `https://localhost:7256`. Start it first, then check `https://localhost:7256/health` (and `/health/ready` for the database). |
+| API fails at startup mentioning the connection string or `Jwt:SigningKey` | Set `ConnectionStrings:CQPulse` and a signing key of at least 32 characters in user secrets ([Run locally](#run-locally)). |
+| *Invalid object name* errors after updating | Pending migrations: run `dotnet ef database update --project src\CQPulse.Infrastructure --startup-project src\CQPulse.Api`. |
+| A service shows **NotConfigured** | Its `Integrations:*` settings are missing. Set them in user secrets and restart the API. |
+| *Unreachable: No connection could be made…* | The service is not running, or `BaseUrl` has the wrong host or port. LogTriageAssistant's https profile is `https://localhost:7291` and SmartDog's is `https://localhost:7018`. |
+| *Unreachable: timed out waiting for a response* | No answer within 5 seconds. On Windows a stopped localhost service can also appear this way, because refused connections are retried. Check that the service is running. |
+| *The SSL connection could not be established* | The development certificate is not trusted: run `dotnet dev-certs https --trust` and restart the services. |
+| Analysis **Failed**: *LogTriageAssistant rejected the configured service account credentials.* | The account does not exist in that LogTriageAssistant instance, or the username or password differ. Register the account in LogTriageAssistant and update `Integrations:LogTriage:Username/Password`. Its session cookie is HTTPS-only, so use its https profile. |
+| Decision **Failed**: *SmartDog rejected the configured API key (401).* | `Integrations:SmartDog:ApiKey` does not match any SmartDog `DecisionApi:ApiKeys:N`. Set the same value on both sides and restart both. |
+| Decision **Unavailable**: *SmartDog returned 503* while SmartDog shows Healthy | SmartDog has no `DecisionApi:ApiKeys` configured; its decision API fails closed until one is set. |
+| Evidence note: *Triage severity was not used: …* | No successful analysis exists, or it was made from different failure data. Analyse (or retry) the run under **Failure triage**, then rank again. |
+| Ranking refused (409): *more than 10,000 distinct failure messages* | Recurrence cannot be counted exactly for that project (see limitations). |
+| No ranking offered | Decision support needs a finished run with at least one failed result. |
+| Correlation ids missing from console logs | Set `Logging__Console__IncludeScopes=true` for CQ Pulse and SmartDog. LogTriageAssistant does not log CQ Pulse's correlation id. |

@@ -414,3 +414,34 @@ Tracked `appsettings*.json` files contain no credentials, and the final E2E serv
 | LogTriageAssistant `dotnet test` (built to a scratch folder) | ✅ 57/57; working tree unchanged (same 27 uncommitted entries) |
 
 **Not verified:** GitHub CI for these commits (not pushed); browsers other than Edge/Chromium; SmartDog's conversational flow (needs Ollama); a Release build.
+
+### Release-readiness pass (2026-10-14, evening)
+
+| Item | Result |
+|---|---|
+| Published commits | `7993db7`, `409c093` and `44cb0da` (README overview) on `origin/main` by fast-forward; no force push; the unrelated `angular.json` change was left unstaged |
+| GitHub Actions | Run 38665530212 (`409c093`) ✅ and run 38665944654 (`44cb0da`) ✅: unit 66/66, integration 109/109 on a SQL Server container; frontend job passed |
+| Release build | `dotnet build CQPulse.slnx -c Release`: 0 warnings, 0 errors. `dotnet publish src/CQPulse.Api -c Release` succeeded, with no credentials in the published appsettings |
+| Tests on the Release build | Unit 66/66, Integration 109/109 (`-c Release --no-build`); client 50/50 and production build (initial 303.95 kB) |
+
+**Clean smoke test with the documented commands.**
+
+- **CQ Pulse:** a new empty database `CQPulse_Tests_<guid>` was created with `dotnet ef database update` (all 5 migrations). The API ran with `dotnet run --project src\CQPulse.Api --launch-profile https`; only `ConnectionStrings__CQPulse` and the `Integrations__*` settings came from environment variables. The client ran with `npm start` on port 4200.
+- **SmartDog:** `dotnet run --project SmartDog.Api --launch-profile https`, with `DecisionApi__ApiKeys__0` from the environment.
+- **LogTriageAssistant:** its unchanged code, built to a scratch folder and run on `https://localhost:7291` with scratch storage, and a newly registered service account.
+- **Cleanup:** the database, scratch credentials and browser profiles were removed afterwards.
+
+| Check | Result |
+|---|---|
+| Startup | Proxy `/health` 200, `/health/ready` 200, anonymous `/api/runs` 401; SmartDog evaluate without key 401; both integrations Healthy |
+| Login, execution, live updates | Login through the form (browser); 500-test catalog run with 102 SignalR messages and exact totals 220/160/120; 5,000-test run with consistent REST progress; 20,000-test run live in the browser with no backward progress |
+| Automatic triage | `Succeeded` automatically (100 findings for 160 failures); repeat request deduplicated |
+| Decision ranking | Ranked by real SmartDog; independent recomputation identical; signature links exact (54/54/52); infeasible constraint reported |
+| History | Decision history newest first; panel history in the browser; rerun linked with identical totals |
+| SmartDog down / restored | Evaluation `Unavailable` with the reason and no ranking (API and browser); runs and triage unaffected; succeeds again after restart |
+| LTA down / restored | Analysis `Unavailable`; ranking without severity, with the reason; retry succeeds on attempt 2 without a new run |
+| Both down | Run completes; dashboard works; both features `Unavailable`; `/health/ready` 200 |
+
+The first browser attempt timed out on the run page. The browser log showed SignalR's "page is being frozen" warning: headless Edge had frozen the tab. The harness now disables background freezing and throttling; rerun with 0 freeze warnings and all checks passed. No application error was logged.
+
+Development database fingerprint after the pass: identical to the pre-migration fingerprint. LogTriageAssistant: still 27 uncommitted entries, `App_Data/logtriage.db` unchanged.

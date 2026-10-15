@@ -54,3 +54,4 @@ Measured behaviour: [performance.md](performance.md).
 - The run and analysis queues are in-process. Queued work survives restarts only as database state (runs are failed by recovery; pending analyses are re-queued), and there is no multi-instance worker coordination.
 - Single global Administrator role; no project-level membership or tenant isolation.
 - The JWT is kept in browser `localStorage` (no refresh tokens).
+- Decision support ranks at most 25 signatures with scores that prioritize observed evidence (not predictions), and triage severity comes from a sample of at most 2,000 failures per run. SmartDog's chat workflow (Ollama) is not used or verified. Details and integration troubleshooting: [quality-intelligence-architecture.md](quality-intelligence-architecture.md#9-operations-and-limitations) and the [README](../README.md#troubleshooting).

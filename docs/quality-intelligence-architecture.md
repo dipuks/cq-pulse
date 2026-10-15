@@ -107,3 +107,21 @@ Each failure signature in the run is one option; at most 25 (the most frequent i
 | SmartDog structured endpoint | `POST /api/decisions/evaluate` with transparent weighted ranking, API-key auth and 49 tests (commit `af04474`); chat workflow preserved |
 | LTA service account | A dedicated account registered in the LTA instance; credentials in CQ Pulse user secrets |
 | Migrations | `AddRunConcurrencyAndActiveRunIndex`, `AddRunRerunLink`, `AddFailureAnalyses` and `AddDecisionEvaluations` applied to the development database after backups, a rehearsal on a restored copy, and data verification (see `feature-audit.md`) |
+
+## 9. Operations and limitations
+
+Setup, configuration, startup order, credentials, test commands and troubleshooting for all three services are in the [README](../README.md#running-all-three-applications).
+
+| Service | Local URL (https profile) | Credentials CQ Pulse needs | Test command |
+|---|---|---|---|
+| CQ Pulse API | `https://localhost:7256` | — (its own JWT users) | `dotnet test CQPulse.slnx --filter "Category!=Performance"` |
+| LogTriageAssistant | `https://localhost:7291` | A dedicated account in LTA: `Integrations:LogTriage:Username/Password` | `dotnet test Tests` |
+| SmartDog | `https://localhost:7018` | One shared key: SmartDog `DecisionApi:ApiKeys:N` = CQ Pulse `Integrations:SmartDog:ApiKey` | `dotnet test SmartDog.slnx` |
+
+Limitations:
+
+- SmartDog's scores prioritize the observed evidence. They are not predictions, and they are relative to the submitted signatures and weights.
+- Ranking is limited to 25 failure signatures per run.
+- Triage severity is based on a sample of at most 2,000 failures per run (the LTA document limit), and the evidence notes say when a run has more.
+- SmartDog's conversational workflow requires a local Ollama model and has not been verified as part of this work; CQ Pulse does not use it.
+- 30-day recurrence is refused (409) above 10,000 distinct failure messages per project rather than undercounted.
