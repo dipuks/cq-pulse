@@ -1,19 +1,49 @@
 # CQ Pulse — Cloud QA
 
+[![CI](https://github.com/dipuks/cq-pulse/actions/workflows/ci.yml/badge.svg)](https://github.com/dipuks/cq-pulse/actions/workflows/ci.yml)
+
 *See every run. Know every risk.*
 
-CQ Pulse is a test management and **simulated** execution platform built with .NET 10, Angular 22 and SQL Server. It organizes projects, suites and test cases, runs large simulated workloads with live progress, and turns persisted results into analytics and explainable quality insights. The execution engine is a simulator: it does not drive real browsers or UI automation.
+CQ Pulse is a test management and quality intelligence platform built with .NET 10, Angular 22 and SQL Server. You organize projects, suites and test cases, run large workloads with live progress, and turn the persisted results into analytics and explainable insights. It shows which failures recur, which tests look flaky, which days are anomalous, and which failure to investigate first.
 
-## Features
+> **Execution is simulated.** CQ Pulse does not drive real browsers or test frameworks. Its simulator produces deterministic, reproducible workloads of up to 50,000 tests per run, so that persistence, real-time updates, analytics and integrations can be built and verified at realistic scale.
 
-- **Catalog:** projects, suites and test cases with search, filters, paging, enable/disable, and per-case execution history that survives edits and deletion (results keep a name snapshot).
-- **Simulator:** runs real catalog test cases (fixed or randomized outcomes, per-case durations) or synthetic workloads; exact, previewable outcome totals; deterministic seeds; configurable limits; cancel and rerun with linked history. Measured at 1k, 10k and 50k tests with bounded memory ([performance](docs/performance.md)).
-- **Live progress:** SignalR updates with REST polling as the authoritative fallback; elapsed time and throughput.
-- **Run history:** server-side filters (project, status, label, UTC dates), sorting and paging; run detail with configuration, timing, results and execution logs.
-- **Analytics and insights:** UTC-consistent trends and failure categories; recurring failure signatures, flaky-test candidates and baseline anomaly detection, each with its rule and evidence. No forecasts.
-- **Failure triage (optional):** integration with a separately running [LogTriageAssistant](https://github.com/dipuks/LogTriageAssistant) for diagnostic analysis, with retries, idempotency, correlation ids and visible dependency health.
-- **Decision support (optional):** ranks a finished run's failure signatures through a separately running SmartDog service, using four documented evidence sources and a transparent weighted method. Every score shows its per-criterion breakdown; missing evidence is left out with the reason, never counted as zero.
-- **Engineering:** layered architecture, RFC 7807 errors, JWT with lockout and rate limiting, optimistic concurrency, startup recovery, 175 backend tests on real SQL Server (66 unit, 109 integration, temporary databases), 50 client tests, CI with a SQL Server service container.
+## What it does
+
+1. **Organize:** projects → suites → test cases, with priorities, enable/disable, search, filters and paging. Every result keeps a snapshot of its test name, so execution history survives edits and deletions.
+2. **Run:** preview the exact pass/fail/skip totals before queueing, then run real catalog cases (fixed or randomized outcomes, per-case durations) or a synthetic workload. Progress is live over SignalR, with REST polling as the authoritative fallback, and shows elapsed time and throughput. The same seed reproduces the same run; cancel and rerun are linked in the history.
+3. **Analyze:** a dashboard, trends and failure categories over UTC-consistent windows. Run history has server-side filters, sorting and paging; run detail shows configuration, timing, every test result and the execution logs.
+4. **Understand:** the Insights page groups failures into signatures (category + normalized message), finds flaky-test candidates and flags anomalous days against a statistical baseline. Every finding shows its rule and its evidence. Nothing is forecast.
+5. **Triage (optional):** runs that finish with failures are sent to [LogTriageAssistant](https://github.com/dipuks/LogTriageAssistant). It returns a severity, categorized findings with redacted evidence, and suggested next steps.
+6. **Decide (optional):** a separate SmartDog decision service ranks the run's failure signatures by occurrences, 30-day recurrence, affected test cases and triage severity. The ranking is a transparent weighted sum: every score comes with its per-criterion breakdown. Missing evidence is left out with the reason, never counted as zero.
+
+## How the pieces fit
+
+```mermaid
+flowchart LR
+    U[Browser<br/>Angular 22] -- REST + SignalR --> API[CQ Pulse API<br/>.NET 10]
+    API --> DB[(SQL Server)]
+    API -- failed results, CSRF + cookie --> LTA[LogTriageAssistant<br/>log triage]
+    API -- signature evidence, API key --> SD[SmartDog<br/>weighted ranking]
+```
+
+The three applications stay independent, with separate repositories, storage and UIs. CQ Pulse talks to the other two only over HTTP, with timeouts, bounded retries, a circuit breaker and correlation ids. If either service is down, CQ Pulse keeps working: it records the outage as *Unavailable* with the reason and never shows invented results. (The SmartDog evaluation API that CQ Pulse calls is not yet published on GitHub.)
+
+## Engineering highlights
+
+- **Correctness under load:** bounded queues and channels with backpressure, and batched persistence in which run counters always equal persisted rows. Also optimistic concurrency with `rowversion`, a filtered unique index that allows one active run per target, and startup recovery. Measured at 1k, 10k and 50k tests with a peak managed heap under 40 MB ([performance](docs/performance.md)).
+- **Security:** ASP.NET Core Identity with JWT; the Administrator role guards every data endpoint and the SignalR hub. Lockout and per-IP sign-in rate limiting; secrets only in user secrets or environment variables.
+- **API design:** RFC 7807 Problem Details with validation errors keyed by field, idempotent analysis requests (SHA-256 input digest), and correlation ids propagated to both services.
+- **Tests:** 66 unit and 109 integration tests against real SQL Server, each run in a temporary database. Also 50 Angular tests, contract-based test doubles for both integrations, opt-in performance tests, and CI on GitHub Actions with a SQL Server service container. End-to-end, offline and browser verification against the real services is recorded in the [feature audit](docs/feature-audit.md).
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| API | .NET 10, ASP.NET Core, EF Core 10, ASP.NET Core Identity + JWT, SignalR, `Microsoft.Extensions.Http.Resilience` |
+| Client | Angular 22 (standalone components, signals, lazy routes), Vitest |
+| Data | SQL Server (Express or LocalDB locally, a container in CI) |
+| Testing | xUnit, `WebApplicationFactory`, GitHub Actions |
 
 Documentation: [architecture](docs/architecture.md) · [quality intelligence integration](docs/quality-intelligence-architecture.md) · [performance](docs/performance.md) · [feature audit](docs/feature-audit.md) · [implementation plan](docs/implementation-plan.md)
 
@@ -138,7 +168,7 @@ Runs that finish with failures are analysed automatically (`Integrations:LogTria
 
 ## Decision support with SmartDog (optional)
 
-**Run detail → Decision support** asks a separately running SmartDog service (local repository `C:\Projects\SmartDog`, not yet published) which of a finished run's failure signatures to investigate first. CQ Pulse uses SmartDog's structured `POST /api/decisions/evaluate` endpoint, which is deterministic and uses no language model or machine learning. The contract is documented in SmartDog's README.
+**Run detail → Decision support** asks a separately running SmartDog decision service (its evaluation API is not yet published on GitHub) which of a finished run's failure signatures to investigate first. CQ Pulse uses SmartDog's structured `POST /api/decisions/evaluate` endpoint, which is deterministic and uses no language model or machine learning. The contract is documented in SmartDog's README.
 
 1. Give SmartDog an API key and CQ Pulse the same key (user secrets on both sides, never in appsettings files):
 
