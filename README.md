@@ -79,7 +79,7 @@ The three services run as independent processes with their own storage, and comm
 
 ## Quality and verification
 
-- **Tests:** 66 unit tests and 109 integration tests against real SQL Server (each run uses a temporary database), plus 50 Angular tests. GitHub Actions runs them on every push to `main`.
+- **Tests:** 91 unit tests and 122 integration tests against real SQL Server (each run uses a temporary database), plus 52 Angular tests. GitHub Actions runs them on every push to `main`.
 - **Integrations:** contract-based test doubles cover outages, timeouts, rejected credentials and malformed responses. End-to-end, service-offline and browser checks against the real services are recorded in the [feature audit](docs/feature-audit.md).
 - **Performance:** a 50,000-test run completes in about 17–19 s with a peak managed heap under 40 MB on a developer machine ([performance](docs/performance.md)).
 - **Reliability:** bounded queues and channels with backpressure, batched persistence (run counters always equal stored rows), optimistic concurrency, one active run per target, and startup recovery.
@@ -170,14 +170,14 @@ The order is a convenience, not a requirement. CQ Pulse checks the other service
 ## Tests
 
 ```powershell
-dotnet test CQPulse.slnx --filter "Category!=Performance"                    # 66 unit + 109 integration tests
+dotnet test CQPulse.slnx --filter "Category!=Performance"                    # 91 unit + 122 integration tests
 dotnet test tests\CQPulse.IntegrationTests --filter "Category=Performance"   # opt-in workload measurements
-Set-Location src\CQPulse.Client; npm test -- --watch=false; npm run build    # 50 client tests, production build
+Set-Location src\CQPulse.Client; npm test -- --watch=false; npm run build    # 52 client tests, production build
 ```
 
 Integration tests host the real API in memory and create a temporary `CQPulse_Tests_<guid>` database per test collection. That database is dropped afterwards, and the development database is never touched. To use another SQL Server, set `CQPULSE_TEST_SQL` to a server-level connection string (no database name).
 
-The other services have their own suites: `dotnet test SmartDog.slnx` in SmartDog (49 tests) and `dotnet test Tests` in LogTriageAssistant (57 tests).
+The other services have their own suites: `dotnet test SmartDog.slnx` in SmartDog (49 tests) and `dotnet test Tests` in LogTriageAssistant (108 tests, plus 5 Playwright end-to-end tests).
 
 ## Configuration reference
 
@@ -187,6 +187,8 @@ The other services have their own suites: `dotnet test SmartDog.slnx` in SmartDo
 | `DevelopmentAdmin:Email`, `DevelopmentAdmin:Password` | user secrets | Seeds an Administrator in the Development environment only |
 | `Integrations:LogTriage:BaseUrl`, `Username`, `Password` | user secrets / environment | Optional failure triage |
 | `Integrations:SmartDog:BaseUrl`, `ApiKey` | user secrets / environment | Optional decision support. `AttemptTimeoutSeconds` (10), `RetryCount` (2) and `RetryBaseDelayMilliseconds` (300) can also be set |
+| `Integrations:LogTriage:MaxFailures` (500, the maximum), `QueueCapacity` (500), `PendingSweepSeconds` (15) | `appsettings.json` / environment | Severity sample size and the analysis queue ([operations](docs/operations.md#failure-analysis-queue)) |
+| `Insights:SignatureBackfill:Enabled` (true), `BatchSize` (1,000), `PauseMilliseconds` (50) | `appsettings.json` / environment | Background signing of failures saved before `AddFailureSignatures` ([operations](docs/operations.md#backfill)) |
 | `Simulator:*` | `appsettings.json` | Limits and tuning (max tests, concurrency, durations, queue, batch size) |
 | `RateLimiting:Login:PermitLimit` / `WindowSeconds` | `appsettings.json` | Sign-in attempts per client IP (default 10 per 60 s) |
 | `Cors:AllowedOrigins` | `appsettings.json` | Only needed when the client is served from another origin |
@@ -211,7 +213,9 @@ Start with **Settings → Connected services**, which checks each configured ser
 | Decision **Failed**: *SmartDog rejected the configured API key (401).* | CQ Pulse's `Integrations:SmartDog:ApiKey` does not match any SmartDog `DecisionApi:ApiKeys:N`. |
 | Decision **Unavailable**: *SmartDog returned 503* while SmartDog shows Healthy | SmartDog has no `DecisionApi:ApiKeys` configured; its decision API fails closed until one is set. |
 | Evidence note: *Triage severity was not used: …* | There is no successful analysis, or it was made from different failure data. Analyse or retry the run under **Failure triage**, then rank again. |
-| Ranking refused (409): *more than 10,000 distinct failure messages* | Recurrence cannot be counted exactly for that project (see limitations). |
+| Ranking refused (409): *… still waiting for the failure signature backfill* | Failed results saved before the `AddFailureSignatures` migration are still being signed. The API does it in the background; `dotnet run --project src\CQPulse.Api --launch-profile https -- backfill-signatures` does it in the foreground ([operations](docs/operations.md#stored-failure-signatures-migration-addfailuresignatures)). |
+| Insights: *Signature counts are not final yet* | Same cause: those failures are in the total but in no signature until the backfill reaches them. |
+| Failure triage: *Waiting for a free analysis slot* | More analyses are waiting than the queue holds (`QueueCapacity`); they are queued automatically, oldest first, as earlier ones finish. |
 
 ## Limitations
 
@@ -220,8 +224,8 @@ Start with **Settings → Connected services**, which checks each configured ser
 - One global Administrator role; the JWT is kept in browser `localStorage` without refresh tokens.
 - SmartDog's scores prioritize observed evidence; they are not predictions, and they are relative to the submitted signatures and weights.
 - Ranking is limited to 25 failure signatures per run (the most frequent).
-- Triage severity is based on a sample of at most 2,000 failures per run (the LogTriageAssistant document limit); the evidence notes say when a run has more.
-- Ranking is refused rather than undercounted when a project has more than 10,000 distinct failure messages in 30 days.
+- Triage severity is based on at most 500 failed results per run, because LogTriageAssistant reports findings for at most 500 lines. Larger runs are sampled so that every signature is represented (most frequent first), and the evidence notes say how many results the severity reflects.
+- Failures saved before the `AddFailureSignatures` migration count in insights and recurrence only after the signature backfill; until then insights say so, and ranking for affected projects is refused (409) rather than undercounted.
 - SmartDog's separate chat workflow requires a local Ollama model and has not been verified; CQ Pulse uses only the structured evaluation API.
 
 Verified results and remaining unverified items are listed in the [feature audit](docs/feature-audit.md).
@@ -231,5 +235,6 @@ Verified results and remaining unverified items are listed in the [feature audit
 - [Architecture](docs/architecture.md): layers, simulator pipeline, cross-cutting concerns
 - [Integration design](docs/quality-intelligence-architecture.md): service contracts, reliability rules, decision-support evidence rules
 - [Performance](docs/performance.md): measured 1k, 10k and 50k runs
+- [Operations](docs/operations.md): the failure-signature migration and backfill (locking, rehearsal, recovery), the analysis queue and the severity sample
 - [Feature audit](docs/feature-audit.md): current verification status, test results and the development log
 - [Implementation plan](docs/implementation-plan.md): historical milestone plan

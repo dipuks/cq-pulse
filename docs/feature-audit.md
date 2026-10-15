@@ -2,23 +2,23 @@
 
 How CQ Pulse was verified. The current status comes first. The dated log below it keeps the evidence from each milestone, starting with the initial audit of the code before any fixes.
 
-Related: [README](../README.md) · [architecture](architecture.md) · [integration design](quality-intelligence-architecture.md) · [performance](performance.md)
+Related: [README](../README.md) · [architecture](architecture.md) · [integration design](quality-intelligence-architecture.md) · [performance](performance.md) · [operations](operations.md)
 
-## Current status (2026-10-14)
+## Current status (2026-10-15)
 
 ### Verified
 
 | Area | Result | Evidence |
 |---|---|---|
 | Release build | ✅ `dotnet build CQPulse.slnx -c Release`: 0 warnings, 0 errors. Angular production build succeeds (initial bundle 303.95 kB) | [Release-readiness pass](#release-readiness-pass-2026-10-14-evening), [portfolio pass](#portfolio-and-documentation-pass-2026-10-14) |
-| Automated tests | ✅ 66 unit, 109 integration (real SQL Server, temporary databases) and 50 client tests, locally on the Release build and in GitHub Actions | Same sections |
+| Automated tests | ✅ 91 unit, 122 integration (real SQL Server, temporary databases) and 52 client tests, locally on the Release build | [Remediation](#remediation-exact-signatures-analysis-backpressure-severity-sample-2026-10-15) |
 | Continuous integration | ✅ GitHub Actions workflow `CI` (`.github/workflows/ci.yml`): `backend` job with a SQL Server service container, and a `frontend` job. Passed for `409c093` and `44cb0da` | Runs 38665530212 and 38665944654 |
-| Catalog, simulator, run history, analytics, insights | ✅ Exact previewed totals, deterministic seeds, rerun, filters, insight rules | Integration tests (M3–M7, Q3); end-to-end runs |
+| Catalog, simulator, run history, analytics, insights | ✅ Exact previewed totals, deterministic seeds, rerun, filters, insight rules. Failure signatures are stored per result and counted exactly in SQL (checked against SQL ground truth on 960,000 results) | Integration tests (M3–M7, Q3); end-to-end runs; [remediation](#remediation-exact-signatures-analysis-backpressure-severity-sample-2026-10-15) |
 | Live progress | ✅ SignalR through the dev proxy (WebSockets) and REST fallback; the browser view never moves backwards | `RealtimeTests`; [release verification](#release-verification-2026-10-14) in headless Edge |
 | Failure triage (LogTriageAssistant) | ✅ Automatic analysis, deduplication, retry without re-running, per-signature severity | `FailureAnalysisTests`; end-to-end against the real service |
 | Decision support (SmartDog) | ✅ Real SmartDog ranking, recomputed independently from the submitted evidence; missing evidence left out with the reason | `DecisionSupportTests`; [Q4](#q4--smartdog-decision-support-2026-10-14) and release verification |
 | Dependency outages | ✅ Either or both services down: runs, dashboard and readiness keep working; failures are recorded as *Unavailable* with the reason; recovery after restart | Offline checks (API and browser) |
-| Migrations and data preservation | ✅ All 5 migrations applied to the development database after verified backups and a rehearsal; data fingerprint identical before and after | [Q4 migration table](#q4--smartdog-decision-support-2026-10-14) |
+| Migrations and data preservation | ✅ The first 5 migrations applied to the development database after verified backups and a rehearsal; data fingerprint identical before and after. `AddFailureSignatures` rehearsed on a restored copy and on 960,000 results (including rollback); **not yet applied to the development database** | [Q4 migration table](#q4--smartdog-decision-support-2026-10-14); [operations](operations.md#rehearsal-results) |
 | Performance | ✅ 1k, 10k and 50k-test runs with exact totals; peak managed heap under 40 MB | [performance.md](performance.md) |
 | Secrets | ✅ Pattern and exact-value scans of the files and full history: no secrets; no database files tracked | [Release verification](#release-verification-2026-10-14) |
 
@@ -511,3 +511,23 @@ The database, credentials and browser profiles were removed afterwards, and the 
 - This audit now opens with the current status, and the initial audit is marked as historical.
 - `architecture.md` gained a Testing section, which replaces the test-harness detail removed from the README.
 - All documents now link to each other.
+
+### Remediation: exact signatures, analysis backpressure, severity sample (2026-10-15)
+
+Fixes for findings C1–C5 of the cross-repository audit.
+
+| Finding | Fix | Evidence |
+|---|---|---|
+| C1 Insights merged the 500 most frequent raw messages in memory, so signatures whose messages contain ids were undercounted (16×–187×) | `TestCaseResults.Signature` stored when results are saved; insights group by it in SQL, report unsigned failures separately (`countsComplete`) and no longer report per-variant upper bounds | 960,000 results: 189,600 failures reported vs 163,357 before; every signature equals SQL ground truth. Regression test with 3,600 failures and 3,000 distinct ids |
+| C2 Recurrence refused above 10,000 distinct messages | Counted in SQL by stored signature; refused (409) only while the backfill is still running for that window | Test with 12,001 distinct messages; 960,000 results: 200 instead of 409 |
+| C3 A full analysis queue blocked the simulation worker, shutdown and startup recovery | Non-blocking queue; Pending analyses that do not fit wait in the database (`waitingForQueueSlot`) and a periodic sweep queues them; completion hooks are limited to 10 s | `AnalysisQueueTests`: saturation, shutdown under saturation, restart recovery, more Pending analyses than the queue holds at startup, orphaned Pending analyses, failing hooks |
+| C4 No time index | `IX_TestCaseResults_Outcome_CompletedAtUtc` (covering) | Time-window endpoints equal or faster with the index; writes about 10–20% slower |
+| C5 Severity sample of 2,000 lines vs LogTriageAssistant's 500 findings | At most 500 lines, sampled round-robin across signatures (most frequent first); startup rejects larger values; the note states the sample | Test with signatures first failing after line 500 |
+
+| Check | Result |
+|---|---|
+| Release build | ✅ 0 warnings, 0 errors |
+| Backend tests (`--filter "Category!=Performance"`) | ✅ Unit 91/91 (`FailureSignatureTests` pins the normalization rules and known hashes), Integration 122/122 |
+| Client tests and production build | ✅ 52/52; build succeeds |
+| Migration rehearsal | ✅ Restored copy of the development database and a generated 960,000-result database: idempotent script, backfill, independent recomputation of every stored signature (0 mismatches), checksums of all original data unchanged, rollback restores identical data ([operations](operations.md#rehearsal-results)) |
+| Development database | Read only (`COPY_ONLY` backup for the rehearsal); fingerprint identical before and after. The migration awaits approval |

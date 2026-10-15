@@ -49,6 +49,10 @@ All 7 cases passed with exact totals. The machine was also running LogTriageAssi
 
 **Decision support at the largest run size** (end to end through the dev proxy, real SmartDog): a 50,000-test synthetic run (35,000/12,500/2,500) finished in 18.0 s. Its automatic LogTriageAssistant analysis succeeded after 1.0 s; its document was truncated at 2,000 failures and the evidence notes say so. Three decision requests took **596, 242 and 208 ms** each, covering evidence queries, the SmartDog round trip and persistence. The evidence counted all 12,500 failures exactly across 4 signatures.
 
+## Large-history queries (2026-10-15)
+
+Insights and decision support were measured on 960,000 generated results (192,000 failed, 24,215 distinct messages) before and after storing failure signatures. The failure-signature report went from 2.7 s and undercounted (163,357 of 189,600 failures) to 0.4 s and exact; decision support went from refused (409) to 0.25 s. Writes became about 10–20% slower (10,000-test runs: median 2.69 s before, 2.97–3.31 s after). Details, method and ground truth are in [operations](operations.md#rehearsal-results).
+
 ## Not measured
 
 - Concurrent runs (the worker executes one run at a time by design).

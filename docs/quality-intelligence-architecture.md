@@ -85,18 +85,18 @@ Each failure signature in the run is one option; at most 25 (the most frequent i
 | Criterion (id) | Default weight | Value | When it is unavailable |
 |---|---:|---|---|
 | Occurrences in this run (`occurrencesInRun`) | 0.35 | Exact count of the run's failed results with the signature | Always available for a finished run with failures |
-| Project recurrence, 30 days (`recurrence30d`) | 0.25 | Exact count over the last 30 UTC days in the project, this run included; 0 when none | More than 10,000 distinct failure messages in the window: the request is refused (409) instead of undercounting |
+| Project recurrence, 30 days (`recurrence30d`) | 0.25 | Exact count over the last 30 UTC days in the project, this run included; 0 when none. Counted in SQL by the signature stored on each failed result | While failed results in the window still wait for the signature backfill, the request is refused (409) instead of undercounting |
 | Affected catalog test cases (`affectedTestCases`) | 0.15 | Distinct catalog test cases that failed with the signature in the run (0 for synthetic workloads, which have none) | — |
 | Triage severity (`triageSeverity`) | 0.25 | Highest LTA finding severity on the signature's document lines: INFO 1, MEDIUM 2, HIGH 3, CRITICAL 4 | Left out for **all** options, with the reason, unless the run's latest successful analysis has per-signature severities, was built from exactly the run's current failure data (same digest) and covers every option. A missing severity is never treated as 0 |
 
 - Weights are relative (> 0 and ≤ 1000) and SmartDog normalizes them. A weight given for an unavailable criterion is reported as not applied.
 - *Minimum occurrences* (1–1,000,000) becomes a hard constraint, and options below it are reported as infeasible rather than hidden.
-- When the analysis covered only part of the run (the document limit is 2,000 failures and 1.5 MB), the note says that severity reflects the first N failures by completion time.
+- LTA reports findings for at most 500 lines, so the document holds at most 500 failed results (and 1.5 MB). A larger run is sampled round-robin across its signatures, most frequent first, so every ranked option is covered; the note says how many of the run's failed results the severity reflects ([operations](operations.md#severity-sample-sent-to-logtriageassistant)).
 - Requests for an active run, or a run without failures, are rejected (409) and nothing is sent.
 
 ## 7. Historical analysis approach (Q3)
 
-- **Failure signature:** failure category + normalized error message (digits, GUIDs and quoted values replaced), 12-hex SHA-256 id. The counts and first/last seen are directly verifiable.
+- **Failure signature:** failure category + normalized error message (GUIDs, hex ids, quoted values and digit runs replaced; whitespace collapsed; first 300 characters), 12-hex SHA-256 id. It is stored on each failed result when it is saved, and insights and recurrence group by it in SQL, so counts are exact for any number of distinct raw messages. The counts and first/last seen are directly verifiable. Rules and their limits are pinned by `FailureSignatureTests`; changing them requires re-running the backfill ([operations](operations.md#recovery)).
 - **Flaky candidate:** the same catalog test case has both passed and failed within a window, with at least N executions. For simulated cases with `SimulatedOutcome = Random`, flakiness is **by design**, and the UI says so.
 - **Anomaly:** daily failure rate compared with a trailing baseline (mean ± k·standard deviation, with minimum baseline days and results). This is a statistical rule, not machine learning.
 - **Prediction:** not offered; the API and UI say so.
@@ -124,6 +124,6 @@ Limitations:
 
 - SmartDog's scores prioritize the observed evidence. They are not predictions, and they are relative to the submitted signatures and weights.
 - Ranking is limited to 25 failure signatures per run.
-- Triage severity is based on a sample of at most 2,000 failures per run (the LTA document limit), and the evidence notes say when a run has more.
+- Triage severity is based on at most 500 failed results per run (the most lines LTA reports findings for), sampled across signatures; the evidence notes say when a run has more.
 - SmartDog's conversational workflow requires a local Ollama model and has not been verified as part of this work; CQ Pulse does not use it.
-- 30-day recurrence is refused (409) above 10,000 distinct failure messages per project rather than undercounted.
+- 30-day recurrence is refused (409) while failures in the window still wait for the signature backfill, rather than undercounted.

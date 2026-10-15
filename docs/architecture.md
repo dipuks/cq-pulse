@@ -57,9 +57,9 @@ Measured behaviour: [performance.md](performance.md).
 
 | Suite | Scope |
 |---|---|
-| `tests/CQPulse.UnitTests` (66) | `TestRun` state machine, synthetic and catalog workload generation with exact allocation, request validation, insight rules and failure-signature normalization |
-| `tests/CQPulse.IntegrationTests` (109) | The real API hosted in memory (`WebApplicationFactory`, environment `Testing`, so no user secrets or development seeders) against SQL Server |
-| `src/CQPulse.Client` (50, Vitest) | Authentication guard and interceptor, error and date handling, the analytics, insights, simulator and run-detail pages, triage and decision panels, and the trend chart |
+| `tests/CQPulse.UnitTests` (91) | `TestRun` state machine, synthetic and catalog workload generation with exact allocation, request validation, insight rules and failure-signature normalization (rules and known hashes pinned) |
+| `tests/CQPulse.IntegrationTests` (122) | The real API hosted in memory (`WebApplicationFactory`, environment `Testing`, so no user secrets or development seeders) against SQL Server |
+| `src/CQPulse.Client` (52, Vitest) | Authentication guard and interceptor, error and date handling, the analytics, insights, simulator and run-detail pages, triage and decision panels, and the trend chart |
 
 - **Databases:** each integration test collection creates a temporary `CQPulse_Tests_<guid>` database, migrates it and drops it afterwards, even when tests fail. Database management only accepts names matching `^CQPulse_Tests_[0-9a-f]{32}$`, so the development database is never touched. Orphans from killed runs are removed once they are more than 6 hours old. Set `CQPULSE_TEST_SQL` to a server-level connection string (no database name) to use another server; CI uses a SQL Server container this way.
 - **Users:** `ApiFixture` creates an Administrator and an authenticated user without a role, both with random passwords, and signs them in through the real `/api/auth/login` endpoint.
@@ -71,4 +71,4 @@ Measured behaviour: [performance.md](performance.md).
 - The run and analysis queues are in-process. Queued work survives restarts only as database state (runs are failed by recovery; pending analyses are re-queued), and there is no multi-instance worker coordination.
 - Single global Administrator role; no project-level membership or tenant isolation.
 - The JWT is kept in browser `localStorage` (no refresh tokens).
-- Decision support ranks at most 25 signatures with scores that prioritize observed evidence (not predictions), and triage severity comes from a sample of at most 2,000 failures per run. SmartDog's chat workflow (Ollama) is not used or verified. Details and integration troubleshooting: [quality-intelligence-architecture.md](quality-intelligence-architecture.md#9-operations-and-limitations) and the [README](../README.md#troubleshooting).
+- Decision support ranks at most 25 signatures with scores that prioritize observed evidence (not predictions), and triage severity comes from a sample of at most 500 failures per run (the most lines LogTriageAssistant reports findings for), taken across signatures. SmartDog's chat workflow (Ollama) is not used or verified. Details and integration troubleshooting: [quality-intelligence-architecture.md](quality-intelligence-architecture.md#9-operations-and-limitations) and the [README](../README.md#troubleshooting).
