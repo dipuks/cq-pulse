@@ -76,7 +76,8 @@ internal static class DecisionEvidenceBuilder
             .Select(g => new { Signature = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.Signature, x => x.Count, cancellationToken);
 
-        var (severities, analysisId) = await ResolveSeveritiesAsync(db, runId, logTriageOptions, selected.Select(s => s.Signature).ToList(), notes, cancellationToken);
+        var (severities, analysisId) = await ResolveSeveritiesAsync(
+            db, runId, logTriageOptions, selected.Select(s => s.Signature).ToList(), signatures.Sum(s => s.Occurrences), notes, cancellationToken);
 
         var options = selected.Select((s, i) => new DecisionOptionEvidenceDto(
             $"sig-{s.Signature}", s.Signature, s.FailureCategory, FailureSignature.Normalize(s.Sample), s.Sample ?? "(no message)",
@@ -88,8 +89,8 @@ internal static class DecisionEvidenceBuilder
     }
 
     private static async Task<(Dictionary<string, string>? Severities, Guid? AnalysisId)> ResolveSeveritiesAsync(
-        CQPulseDbContext db, Guid runId, LogTriageOptions logTriageOptions, IReadOnlyList<string> signatures, List<string> notes,
-        CancellationToken cancellationToken)
+        CQPulseDbContext db, Guid runId, LogTriageOptions logTriageOptions, IReadOnlyList<string> signatures, int runFailures,
+        List<string> notes, CancellationToken cancellationToken)
     {
         const string NotUsed = "Triage severity was not used: ";
         var analysis = await db.FailureAnalyses.AsNoTracking()
@@ -132,8 +133,9 @@ internal static class DecisionEvidenceBuilder
         }
         notes.Add("Triage severity comes from LogTriageAssistant analysis " + analysis.Id + " (highest finding severity per signature).");
         if (document.Truncated)
-            notes.Add($"That analysis covered the run's first {document.FailureCount:N0} failed results by completion time (the " +
-                "Integrations:LogTriage document limits), so each severity reflects those results only.");
+            notes.Add($"That analysis covered {document.FailureCount:N0} of the run's {runFailures:N0} failed results: LogTriageAssistant " +
+                $"reports findings for at most {LogTriageOptions.ProviderFindingLimit} lines, so CQ Pulse submits a sample (Integrations:LogTriage " +
+                "document limits) that includes each signature, most frequent first. Each severity reflects the sampled results only.");
         return (map, analysis.Id);
     }
 }

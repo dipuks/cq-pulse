@@ -97,8 +97,63 @@ public sealed class DecisionSupportTests(ApiFixture fixture)
         var evaluation = await (await client.PostJsonAsync($"/api/runs/{run.Id}/decision-support", new { })).ReadAsync<DecisionEvaluationDto>();
 
         Assert.Equal("CRITICAL", Assert.Single(evaluation.Evidence).TriageSeverity);
-        Assert.Contains("That analysis covered the run's first 5 failed results by completion time (the Integrations:LogTriage document limits), " +
-            "so each severity reflects those results only.", evaluation.EvidenceNotes);
+        Assert.Contains($"That analysis covered 5 of the run's {run.FailedCount} failed results: LogTriageAssistant reports findings for at most 500 lines, " +
+            "so CQ Pulse submits a sample (Integrations:LogTriage document limits) that includes each signature, most frequent first. " +
+            "Each severity reflects the sampled results only.", evaluation.EvidenceNotes);
+    }
+
+    /// <summary>
+    /// Regression for the 2,000-line document versus LogTriageAssistant's 500 findings: signatures that first fail after line
+    /// 500 used to get no severity, so severity was dropped for every option.
+    /// </summary>
+    [Fact]
+    public async Task Severity_covers_every_signature_when_a_run_has_more_failures_than_LogTriageAssistant_reports_on()
+    {
+        await using var factory = WithIntegrations(new FakeLogTriageHandler(), new FakeSmartDogHandler());
+        using var client = await AdminClientAsync(factory);
+        var start = DateTimeOffset.UtcNow.AddHours(-1);
+        var rows = Enumerable.Range(0, 600).Select(i => new SeedResult(start.AddSeconds(i), TestOutcome.Failed, FailureCategory.Timeout, "Simulated Timeout failure."))
+            .Concat(Enumerable.Range(0, 3).Select(i => new SeedResult(start.AddSeconds(700 + i), TestOutcome.Failed, FailureCategory.ApiError, "Simulated ApiError failure.")))
+            .Append(new SeedResult(start.AddSeconds(800), TestOutcome.Failed, FailureCategory.UiElement, "Simulated UiElement failure."))
+            .ToList();
+        var runId = await fixture.InsertCompletedRunAsync((await client.CreateProjectAsync()).Id, rows);
+        var (timeout, apiError, uiElement) = (FailureSignature.Compute(FailureCategory.Timeout, "Simulated Timeout failure."),
+            FailureSignature.Compute(FailureCategory.ApiError, "Simulated ApiError failure."), FailureSignature.Compute(FailureCategory.UiElement, "Simulated UiElement failure."));
+        try
+        {
+            // Round-robin across signatures (most frequent first), written in completion order, and deterministic.
+            var small = await fixture.WithDbContextAsync(db => AnalysisDocumentBuilder.BuildAsync(db, runId, new LogTriageOptions { MaxFailures = 4 }, default));
+            Assert.Equal([timeout, timeout, apiError, uiElement], small.LineSignatures);
+            var full = await fixture.WithDbContextAsync(db => AnalysisDocumentBuilder.BuildAsync(db, runId, new LogTriageOptions(), default));
+            var again = await fixture.WithDbContextAsync(db => AnalysisDocumentBuilder.BuildAsync(db, runId, new LogTriageOptions(), default));
+            Assert.Equal((500, true, 496), (full.FailureCount, full.Truncated, full.LineSignatures.Count(s => s == timeout)));
+            Assert.Equal(full.Digest, again.Digest);
+
+            var analysis = await AnalyzeAsync(client, runId);
+            Assert.Equal((500, true), (analysis.InputFailureCount, analysis.InputTruncated));
+            var evaluation = await (await client.PostJsonAsync($"/api/runs/{runId}/decision-support", new { })).ReadAsync<DecisionEvaluationDto>();
+
+            Assert.Contains(evaluation.Criteria, c => c.Id == DecisionCriteria.TriageSeverity);
+            Assert.Equal(("HIGH", "CRITICAL", "MEDIUM"), (evaluation.Evidence.Single(e => e.Signature == timeout).TriageSeverity,
+                evaluation.Evidence.Single(e => e.Signature == apiError).TriageSeverity, evaluation.Evidence.Single(e => e.Signature == uiElement).TriageSeverity));
+            Assert.Contains("That analysis covered 500 of the run's 604 failed results: LogTriageAssistant reports findings for at most 500 lines, " +
+                "so CQ Pulse submits a sample (Integrations:LogTriage document limits) that includes each signature, most frequent first. " +
+                "Each severity reflects the sampled results only.", evaluation.EvidenceNotes);
+        }
+        finally
+        {
+            await fixture.DeleteRunsAsync(runId);
+        }
+    }
+
+    [Fact]
+    public async Task A_document_limit_above_what_LogTriageAssistant_reports_on_is_rejected_at_startup()
+    {
+        await using var factory = WithIntegrations(new FakeLogTriageHandler(), new FakeSmartDogHandler(), ("Integrations:LogTriage:MaxFailures", "501"));
+
+        var error = Assert.ThrowsAny<Exception>(() => factory.CreateClient());
+
+        Assert.Contains("MaxFailures must be 1-500", error.ToString());
     }
 
     [Fact]

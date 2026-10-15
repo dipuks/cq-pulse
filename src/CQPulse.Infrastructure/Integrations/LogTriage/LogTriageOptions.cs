@@ -7,6 +7,8 @@ namespace CQPulse.Infrastructure.Integrations.LogTriage;
 public sealed class LogTriageOptions
 {
     public const string SectionName = "Integrations:LogTriage";
+    /// <summary>LogTriageAssistant returns findings for at most this many lines per document.</summary>
+    public const int ProviderFindingLimit = 500;
 
     /// <summary>HTTPS base URL, e.g. https://localhost:7291 (LTA's session cookie is Secure-only).</summary>
     public string? BaseUrl { get; set; }
@@ -17,8 +19,12 @@ public sealed class LogTriageOptions
     public bool AutoAnalyzeFailedRuns { get; set; } = true;
     /// <summary>Upper bound for the submitted JSONL document (LTA accepts up to 2 MB).</summary>
     public int MaxDocumentBytes { get; set; } = 1_500_000;
-    /// <summary>Maximum failed results included in one document; more are reported as truncated.</summary>
-    public int MaxFailures { get; set; } = 2_000;
+    /// <summary>
+    /// Maximum failed results included in one document (1 to <see cref="ProviderFindingLimit"/>: lines beyond the provider's
+    /// finding limit could never receive a severity). Runs with more failed results are sampled so that every signature is
+    /// represented where possible, and the analysis is recorded as truncated.
+    /// </summary>
+    public int MaxFailures { get; set; } = ProviderFindingLimit;
     public int AttemptTimeoutSeconds { get; set; } = 20;
     /// <summary>In-memory analysis queue size. When it is full, new analyses wait as Pending in the database.</summary>
     public int QueueCapacity { get; set; } = 500;
@@ -28,7 +34,8 @@ public sealed class LogTriageOptions
     public int RetryCount { get; set; } = 2;
     public int RetryBaseDelayMilliseconds { get; set; } = 500;
 
-    public bool IsValid => QueueCapacity is >= 1 and <= 10_000 && PendingSweepSeconds is >= 1 and <= 86_400;
+    public bool IsValid => MaxFailures is >= 1 and <= ProviderFindingLimit && MaxDocumentBytes > 0 &&
+                           QueueCapacity is >= 1 and <= 10_000 && PendingSweepSeconds is >= 1 and <= 86_400;
 
     public bool IsConfigured =>
         Uri.TryCreate(BaseUrl, UriKind.Absolute, out _) && !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password);
