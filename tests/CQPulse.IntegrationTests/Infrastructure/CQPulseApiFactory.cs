@@ -22,5 +22,8 @@ public sealed class CQPulseApiFactory(TestDatabase database) : WebApplicationFac
         builder.UseSetting("Jwt:SigningKey", JwtSigningKey);
         // In-memory requests share one rate-limit partition (no client IP); tests that need the limit set it explicitly.
         builder.UseSetting("RateLimiting:Login:PermitLimit", "100000");
+        // This shared host has no LogTriageAssistant configured; it must not sweep up Pending analyses that a test's own
+        // configured host is about to process (tests that exercise the sweep configure their host's interval).
+        builder.UseSetting("Integrations:LogTriage:PendingSweepSeconds", "86400");
     }
 }

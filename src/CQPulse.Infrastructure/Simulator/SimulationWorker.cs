@@ -29,6 +29,8 @@ internal sealed class SimulationWorker(
 {
     private const int MaxSummaryLength = 1_000;
     private const int MaxSaveAttempts = 10;
+    /// <summary>Time each run-completion hook gets; independent of shutdown so follow-up work for a finished run is recorded.</summary>
+    internal static readonly TimeSpan CompletionHookTimeout = TimeSpan.FromSeconds(10);
     private SimulatorOptions Settings => options.Value;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -275,18 +277,24 @@ internal sealed class SimulationWorker(
         }
     }
 
-    /// <summary>Post-run hooks (e.g. failure analysis). The run is already final; hook failures are logged and ignored.</summary>
+    /// <summary>
+    /// Post-run hooks (e.g. failure analysis). The run is already final; hook failures are logged and ignored. Each hook
+    /// gets <see cref="CompletionHookTimeout"/> (hooks only record work, they never wait for external services), so no hook
+    /// can hold up the next run or shutdown for longer than that.
+    /// </summary>
     private async Task NotifyCompletionAsync(IServiceProvider services, Guid runId, RunStatus status, int failedCount)
     {
         foreach (var observer in services.GetServices<IRunCompletionObserver>())
         {
+            using var timeout = new CancellationTokenSource(CompletionHookTimeout);
             try
             {
-                await observer.OnRunCompletedAsync(runId, status, failedCount, CancellationToken.None);
+                await observer.OnRunCompletedAsync(runId, status, failedCount, timeout.Token);
             }
             catch (Exception exception)
             {
-                logger.LogWarning(exception, "Run completion hook {Observer} failed for run {RunId}; the run is unaffected.", observer.GetType().Name, runId);
+                logger.LogWarning(exception, "Run completion hook {Observer} failed for run {RunId}; the run is unaffected. " +
+                    "Its follow-up work (e.g. failure analysis) can be requested from the run page.", observer.GetType().Name, runId);
             }
         }
     }

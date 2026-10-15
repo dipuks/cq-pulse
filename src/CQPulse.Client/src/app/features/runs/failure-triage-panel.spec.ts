@@ -43,6 +43,16 @@ describe('FailureTriagePanel', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).toContain('Analysis in progress');
   });
 
+  it('says when a pending analysis is waiting for a queue slot instead of running', () => {
+    const fixture = render();
+    backend.expectOne('/api/runs/r1/failure-analyses')
+      .flush([analysis({ status: 'Pending', completedAtUtc: null, severity: null, findings: [], waitingForQueueSlot: true })]);
+    fixture.detectChanges();
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Waiting for a free analysis slot');
+    expect(text).not.toContain('Analysis in progress');
+  });
+
   it('shows provider output with an explicit heuristic label', () => {
     const fixture = render();
     backend.expectOne('/api/runs/r1/failure-analyses').flush([analysis({})]);

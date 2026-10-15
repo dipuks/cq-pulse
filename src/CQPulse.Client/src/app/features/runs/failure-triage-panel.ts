@@ -36,7 +36,9 @@ import { FailureAnalysis } from '../../core/models';
           <span class="empty"> · requested {{ a.requestedAtUtc | date: 'medium' }}{{ a.completedAtUtc ? ' · finished ' + (a.completedAtUtc | date: 'mediumTime') : '' }}
             · attempt {{ a.attempts }} · {{ a.inputFailureCount | number }} failures submitted{{ a.inputTruncated ? ' (truncated)' : '' }}</span>
         </p>
-        @if (a.status === 'Pending' || a.status === 'Running') { <p class="empty">Analysis in progress…</p> }
+        @if (a.waitingForQueueSlot) {
+          <p class="empty">Waiting for a free analysis slot: the queue is full, and this analysis is queued automatically as earlier ones finish.</p>
+        } @else if (a.status === 'Pending' || a.status === 'Running') { <p class="empty">Analysis in progress…</p> }
         @if (a.lastError) { <p class="error">{{ a.lastError }}</p> }
         @if (a.status === 'Succeeded') {
           <dl class="definition-list">

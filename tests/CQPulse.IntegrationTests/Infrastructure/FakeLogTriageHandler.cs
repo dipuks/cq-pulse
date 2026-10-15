@@ -26,6 +26,8 @@ public sealed class FakeLogTriageHandler : HttpMessageHandler
 
     public Mode Behavior { get; set; } = Mode.Healthy;
     public TimeSpan SlowDelay { get; set; } = TimeSpan.FromSeconds(5);
+    /// <summary>When set, analyze requests wait for it (honouring cancellation), to keep the analysis queue saturated.</summary>
+    public TaskCompletionSource? Hold { get; set; }
     public bool Ready { get; set; } = true;
     public int LoginCalls;
     public int AnalyzeCalls;
@@ -77,6 +79,7 @@ public sealed class FakeLogTriageHandler : HttpMessageHandler
                 var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken)).RootElement;
                 var logText = body.GetProperty("logText").GetString()!;
                 AnalyzeRequests.Enqueue((logText, request.Headers.TryGetValues("X-Correlation-ID", out var ids) ? ids.Single() : null));
+                if (Hold is { } hold) await hold.Task.WaitAsync(cancellationToken);
 
                 switch (Behavior)
                 {

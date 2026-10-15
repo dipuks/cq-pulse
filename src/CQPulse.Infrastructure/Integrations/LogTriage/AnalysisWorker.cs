@@ -14,8 +14,10 @@ namespace CQPulse.Infrastructure.Integrations.LogTriage;
 
 /// <summary>
 /// Processes queued failure analyses one at a time. Only the <see cref="FailureAnalysis"/> record is written; runs and
-/// results are read-only here. On startup, analyses interrupted mid-flight are marked Unavailable (retryable) and
-/// pending ones are re-queued.
+/// results are read-only here. On startup, analyses interrupted mid-flight are marked Unavailable (retryable). Pending
+/// analyses that are not in the queue (it was full, the application restarted, or a request was cancelled after saving)
+/// are queued oldest first at startup and then every <see cref="LogTriageOptions.PendingSweepSeconds"/>, without waiting
+/// for room, so the queue size bounds memory but never loses or blocks a request.
 /// </summary>
 internal sealed class AnalysisWorker(
     AnalysisQueue queue,
@@ -29,9 +31,11 @@ internal sealed class AnalysisWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        Task sweeper = Task.CompletedTask;
         try
         {
             await RecoverAsync(stoppingToken);
+            sweeper = SweepPeriodicallyAsync(stoppingToken);
             await foreach (var analysisId in queue.ReadAllAsync(stoppingToken))
             {
                 try
@@ -47,11 +51,63 @@ internal sealed class AnalysisWorker(
                     logger.LogError(exception, "Failure analysis {AnalysisId} crashed.", analysisId);
                     await TryFinishAsync(analysisId, AnalysisStatus.Failed, $"Unexpected error: {exception.GetBaseException().Message}");
                 }
+                finally
+                {
+                    queue.Release(analysisId);
+                }
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Normal shutdown.
+            // Normal shutdown. Queued analyses stay Pending in the database and are queued again at the next start.
+        }
+        finally
+        {
+            await sweeper;
+        }
+    }
+
+    /// <summary>Queues Pending analyses that are not queued yet, oldest first, while there is room. Returns how many.</summary>
+    internal async Task<int> SweepAsync(CancellationToken cancellationToken)
+    {
+        var room = queue.Capacity - queue.Count;
+        if (room <= 0) return 0;
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<CQPulseDbContext>();
+        // At most Capacity + 1 pending analyses are already tracked (queued or running), so this always reaches `room` others.
+        var pending = await db.FailureAnalyses.AsNoTracking().Where(x => x.Status == AnalysisStatus.Pending)
+            .OrderBy(x => x.RequestedAtUtc).ThenBy(x => x.Id).Select(x => x.Id)
+            .Take(queue.Capacity + 1 + room).ToListAsync(cancellationToken);
+        var queued = 0;
+        foreach (var id in pending.Where(id => !queue.IsQueuedOrRunning(id)))
+        {
+            if (!queue.TryQueue(id)) break;
+            queued++;
+        }
+        return queued;
+    }
+
+    private async Task SweepPeriodicallyAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(options.Value.PendingSweepSeconds));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stoppingToken))
+            {
+                try
+                {
+                    var queued = await SweepAsync(stoppingToken);
+                    if (queued > 0) logger.LogInformation("Analysis sweep queued {Queued} pending analyses.", queued);
+                }
+                catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning(exception, "Analysis sweep failed; it runs again in {Seconds} s.", options.Value.PendingSweepSeconds);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Shutdown.
         }
     }
 
@@ -104,11 +160,9 @@ internal sealed class AnalysisWorker(
             analysis.Fail(DateTimeOffset.UtcNow, AnalysisStatus.Unavailable, "Analysis was interrupted by an application restart; retry it.");
         await db.SaveChangesAsync(stoppingToken);
 
-        var pending = await db.FailureAnalyses.Where(x => x.Status == AnalysisStatus.Pending)
-            .OrderBy(x => x.RequestedAtUtc).Select(x => x.Id).ToListAsync(stoppingToken);
-        foreach (var id in pending) await queue.QueueAsync(id, stoppingToken);
-        if (interrupted.Count + pending.Count > 0)
-            logger.LogInformation("Analysis recovery: {Interrupted} interrupted, {Pending} re-queued.", interrupted.Count, pending.Count);
+        var queued = await SweepAsync(stoppingToken);
+        if (interrupted.Count + queued > 0)
+            logger.LogInformation("Analysis recovery: {Interrupted} interrupted, {Queued} pending re-queued.", interrupted.Count, queued);
     }
 
     private async Task TryFinishAsync(Guid analysisId, AnalysisStatus status, string error)

@@ -97,6 +97,8 @@ export interface FailureAnalysis {
   inputFailureCount: number; inputTruncated: boolean; correlationId: string; externalAnalysisId?: string | null;
   severity?: string | null; summary?: string | null; signalScore?: number | null; topCategory?: string | null;
   findings: AnalysisFinding[]; recommendations: string[];
+  /** Pending but not queued yet (the queue was full); it is queued automatically as earlier analyses finish. */
+  waitingForQueueSlot?: boolean;
 }
 export interface IntegrationStatus { name: string; configured: boolean; status: string; detail?: string | null; baseUrl?: string | null; checkedAtUtc: string; }
 

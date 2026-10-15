@@ -95,7 +95,9 @@ public static class ServiceCollectionExtensions
     private static void AddLogTriageIntegration(IServiceCollection services, IConfiguration configuration)
     {
         var settings = configuration.GetSection(LogTriageOptions.SectionName).Get<LogTriageOptions>() ?? new LogTriageOptions();
-        services.AddOptions<LogTriageOptions>().Bind(configuration.GetSection(LogTriageOptions.SectionName));
+        services.AddOptions<LogTriageOptions>().Bind(configuration.GetSection(LogTriageOptions.SectionName))
+            .Validate(options => options.IsValid, "Integrations:LogTriage is invalid: QueueCapacity must be 1-10,000 and PendingSweepSeconds 1-86,400.")
+            .ValidateOnStart();
         services.AddSingleton<LogTriageSession>();
         services.AddSingleton<AnalysisQueue>();
         services.AddScoped<FailureAnalysisService>();

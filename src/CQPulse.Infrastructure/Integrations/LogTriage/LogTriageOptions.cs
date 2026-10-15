@@ -20,9 +20,15 @@ public sealed class LogTriageOptions
     /// <summary>Maximum failed results included in one document; more are reported as truncated.</summary>
     public int MaxFailures { get; set; } = 2_000;
     public int AttemptTimeoutSeconds { get; set; } = 20;
+    /// <summary>In-memory analysis queue size. When it is full, new analyses wait as Pending in the database.</summary>
+    public int QueueCapacity { get; set; } = 500;
+    /// <summary>How often Pending analyses that are not in the queue (it was full) are queued.</summary>
+    public int PendingSweepSeconds { get; set; } = 15;
     /// <summary>Retries for transient failures only (network errors, 408, 429, 5xx).</summary>
     public int RetryCount { get; set; } = 2;
     public int RetryBaseDelayMilliseconds { get; set; } = 500;
+
+    public bool IsValid => QueueCapacity is >= 1 and <= 10_000 && PendingSweepSeconds is >= 1 and <= 86_400;
 
     public bool IsConfigured =>
         Uri.TryCreate(BaseUrl, UriKind.Absolute, out _) && !string.IsNullOrWhiteSpace(Username) && !string.IsNullOrWhiteSpace(Password);
