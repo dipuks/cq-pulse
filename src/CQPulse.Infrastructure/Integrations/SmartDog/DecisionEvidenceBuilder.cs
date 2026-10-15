@@ -17,9 +17,10 @@ internal sealed record DecisionEvidence(
 /// Gathers the evidence for ranking a run's failure signatures, from persisted data only. Rules:
 /// <list type="bullet">
 /// <item>Options are the run's failure signatures, top <see cref="MaxOptions"/> by occurrences in the run (ties by signature).</item>
-/// <item>Occurrences, 30-day project recurrence and distinct affected catalog test cases are exact counts. If the project has
-/// more than <see cref="MaxRecurrenceGroups"/> distinct failure messages in the window, recurrence cannot be counted exactly
-/// and the request is refused (409) rather than undercounting.</item>
+/// <item>Occurrences, 30-day project recurrence and distinct affected catalog test cases are exact counts. Recurrence is
+/// counted in SQL by the signature stored on each failed result, so it is exact for any number of distinct messages. While
+/// failed results in the window are still waiting for the signature backfill, the request is refused (409) rather than
+/// undercounting.</item>
 /// <item>Triage severity is used only if the run's latest completed LogTriageAssistant analysis has per-signature
 /// severities, was made from exactly the run's current failure data (same input digest), and covers every option.
 /// Otherwise the criterion is left out for all options and the reason is recorded: missing severity is never treated as 0.</item>
@@ -28,8 +29,6 @@ internal sealed record DecisionEvidence(
 internal static class DecisionEvidenceBuilder
 {
     public const int MaxOptions = 25;
-    /// <summary>Most distinct project-wide (category, message) pairs loaded to count 30-day recurrence in memory.</summary>
-    internal const int MaxRecurrenceGroups = 10_000;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     public static async Task<DecisionEvidence> BuildAsync(
@@ -62,23 +61,20 @@ internal static class DecisionEvidenceBuilder
             notes.Add($"The run has {signatures.Count} failure signatures; the {MaxOptions} most frequent were ranked.");
         var selected = signatures.Take(MaxOptions).ToList();
 
-        // Project-wide recurrence over the last 30 UTC days (including this run).
+        // Project-wide recurrence over the last 30 UTC days (including this run), by stored signature.
         var window = InsightWindows.LastDays(30, now);
-        var recurrenceGroups = await db.TestCaseResults.AsNoTracking()
+        var projectFailures = db.TestCaseResults.AsNoTracking()
             .Where(x => x.Outcome == TestOutcome.Failed && x.TestRun.ProjectId == projectId &&
-                        x.CompletedAtUtc >= window.FromUtc && x.CompletedAtUtc < window.ToUtc)
-            .GroupBy(x => new { x.FailureCategory, x.ErrorMessage })
-            .Select(g => new { g.Key.FailureCategory, g.Key.ErrorMessage, Count = g.Count() })
-            .OrderByDescending(g => g.Count)
-            .Take(MaxRecurrenceGroups + 1)
-            .ToListAsync(cancellationToken);
-        // Signatures are computed in memory, so every message must be loaded for exact counts: refuse rather than undercount.
-        if (recurrenceGroups.Count > MaxRecurrenceGroups)
-            throw new ConflictException($"The project has more than {MaxRecurrenceGroups:N0} distinct failure messages in the last 30 days, " +
-                "so exact recurrence counts cannot be computed. No ranking was requested.");
-        var recurrence = recurrenceGroups
-            .GroupBy(g => FailureSignature.Compute(g.FailureCategory, g.ErrorMessage))
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Count));
+                        x.CompletedAtUtc >= window.FromUtc && x.CompletedAtUtc < window.ToUtc);
+        var unsigned = await projectFailures.CountAsync(x => x.Signature == null, cancellationToken);
+        if (unsigned > 0)
+            throw new ConflictException($"{unsigned:N0} failed results from the last 30 days are still waiting for the failure signature " +
+                "backfill, so exact recurrence counts cannot be computed yet. No ranking was requested; try again when the backfill has finished.");
+        var keys = selected.Select(s => s.Signature).ToList();
+        var recurrence = await projectFailures.Where(x => keys.Contains(x.Signature!))
+            .GroupBy(x => x.Signature!)
+            .Select(g => new { Signature = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Signature, x => x.Count, cancellationToken);
 
         var (severities, analysisId) = await ResolveSeveritiesAsync(db, runId, logTriageOptions, selected.Select(s => s.Signature).ToList(), notes, cancellationToken);
 

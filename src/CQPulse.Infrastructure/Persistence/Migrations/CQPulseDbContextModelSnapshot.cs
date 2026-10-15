@@ -322,6 +322,12 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                     b.Property<int>("Outcome")
                         .HasColumnType("int");
 
+                    b.Property<string>("Signature")
+                        .HasMaxLength(12)
+                        .IsUnicode(false)
+                        .HasColumnType("char(12)")
+                        .IsFixedLength();
+
                     b.Property<DateTimeOffset>("StartedAtUtc")
                         .HasColumnType("datetimeoffset");
 
@@ -339,6 +345,11 @@ namespace CQPulse.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("TestCaseId");
+
+                    b.HasIndex("Outcome", "CompletedAtUtc")
+                        .HasDatabaseName("IX_TestCaseResults_Outcome_CompletedAtUtc");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Outcome", "CompletedAtUtc"), new[] { "Signature", "TestRunId", "TestCaseId", "FailureCategory", "DurationMs" });
 
                     b.HasIndex("TestRunId", "Outcome");
 

@@ -6,16 +6,27 @@ namespace CQPulse.Application.Insights;
 public sealed record InsightWindow(DateTimeOffset FromUtc, DateTimeOffset ToUtc, DateTimeOffset PreviousFromUtc);
 
 /// <summary>
-/// A recurring failure: category + normalized message. Occurrence counts are exact. Affected run/test counts are exact
-/// for a single message variant; when several variants normalize to the same signature they are summed (an upper bound)
-/// and <see cref="CountsAreUpperBounds"/> is true.
+/// A recurring failure: category + normalized message (see <c>FailureSignature</c>), grouped in SQL by the signature stored
+/// on each failed result. Occurrences, previous occurrences, affected runs and affected catalog test cases are exact
+/// (distinct) counts over every signed failure in the window. <see cref="SampleMessage"/> is a raw message from the
+/// signature's most recent failure.
 /// </summary>
 public sealed record FailureSignatureDto(
     string Signature, FailureCategory? Category, string NormalizedMessage, string SampleMessage,
     int Occurrences, int PreviousOccurrences, int AffectedRuns, int AffectedTestCases,
-    DateTimeOffset FirstSeenUtc, DateTimeOffset LastSeenUtc, int MessageVariants, bool CountsAreUpperBounds);
+    DateTimeOffset FirstSeenUtc, DateTimeOffset LastSeenUtc);
 
-public sealed record FailureSignatureReportDto(InsightWindow Window, int TotalFailures, IReadOnlyList<FailureSignatureDto> Signatures);
+/// <param name="TotalFailures">Every failed result in the window (exact).</param>
+/// <param name="DistinctSignatures">Distinct signatures among the signed failures in the window (exact).</param>
+/// <param name="UnsignedFailures">
+/// Failed results in the window that have no stored signature yet (written before the column existed; the background
+/// backfill assigns them). They are counted in <paramref name="TotalFailures"/> but in no signature.
+/// </param>
+/// <param name="PreviousUnsignedFailures">The same for the previous window, which <c>PreviousOccurrences</c> come from.</param>
+/// <param name="CountsComplete">True when no failure in either window is waiting for the backfill, so every count is final.</param>
+public sealed record FailureSignatureReportDto(
+    InsightWindow Window, int TotalFailures, IReadOnlyList<FailureSignatureDto> Signatures,
+    int DistinctSignatures, int UnsignedFailures, int PreviousUnsignedFailures, bool CountsComplete);
 
 /// <summary>A test case that both passed and failed within the window, with enough executions to say so.</summary>
 public sealed record FlakyCandidateDto(

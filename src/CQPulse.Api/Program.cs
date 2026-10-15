@@ -70,6 +70,13 @@ builder.Services.AddCors(options => options.AddPolicy("client", policy =>
 
 var app = builder.Build();
 
+// Operator command (see docs/operations.md): fill stored failure signatures, then exit without serving requests.
+if (args.Contains(CQPulse.Infrastructure.Persistence.SignatureBackfillCommand.Name, StringComparer.OrdinalIgnoreCase))
+{
+    Environment.ExitCode = await CQPulse.Infrastructure.Persistence.SignatureBackfillCommand.RunAsync(app.Services, Console.Out);
+    return;
+}
+
 app.UseMiddleware<CorrelationMiddleware>();
 app.UseExceptionHandler();
 app.UseHttpsRedirection();

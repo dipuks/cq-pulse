@@ -19,39 +19,69 @@ namespace CQPulse.Api.Controllers;
 [Route("api/insights")]
 public sealed class InsightsController(CQPulseDbContext dbContext) : ControllerBase
 {
-    private const int MaxMessageGroups = 500;
-
+    /// <summary>
+    /// Top recurring failure signatures, grouped in SQL by the signature stored on every failed result, so every count is
+    /// exact however many distinct raw messages there are. Failures still waiting for the signature backfill are reported
+    /// separately (<see cref="FailureSignatureReportDto.UnsignedFailures"/>), never silently left out.
+    /// </summary>
     [HttpGet("failure-signatures")]
     public async Task<FailureSignatureReportDto> FailureSignatures(Guid? projectId, int days = 30, int top = 20, CancellationToken cancellationToken = default)
     {
         var window = Window(days);
-        var current = await GroupFailuresAsync(Results(projectId, window.FromUtc, window.ToUtc), cancellationToken);
-        var previous = await Results(projectId, window.PreviousFromUtc, window.FromUtc)
-            .Where(x => x.Outcome == TestOutcome.Failed)
-            .GroupBy(x => new { x.FailureCategory, x.ErrorMessage })
-            .Select(g => new { g.Key.FailureCategory, g.Key.ErrorMessage, Count = g.Count() })
-            .OrderByDescending(x => x.Count).Take(MaxMessageGroups)
-            .ToListAsync(cancellationToken);
-        var previousBySignature = previous
-            .GroupBy(x => FailureSignature.Compute(x.FailureCategory, x.ErrorMessage))
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Count));
+        var current = Results(projectId, window.FromUtc, window.ToUtc).Where(x => x.Outcome == TestOutcome.Failed);
+        var previous = Results(projectId, window.PreviousFromUtc, window.FromUtc).Where(x => x.Outcome == TestOutcome.Failed);
 
-        var signatures = current
-            .GroupBy(x => FailureSignature.Compute(x.Category, x.Message))
-            .Select(g =>
+        // Every query reads the (Outcome, CompletedAtUtc) index, which includes the stored signature. Each aggregate has at
+        // most one DISTINCT: SQL Server evaluates two distinct aggregates in one GROUP BY through a spool, about 5x slower.
+        var totals = await current.GroupBy(_ => 1)
+            .Select(g => new { Failures = g.Count(), Unsigned = g.Count(x => x.Signature == null) })
+            .SingleOrDefaultAsync(cancellationToken);
+        var previousUnsigned = await previous.CountAsync(x => x.Signature == null, cancellationToken);
+        var signed = current.Where(x => x.Signature != null);
+        var distinctSignatures = await signed.Select(x => x.Signature).Distinct().CountAsync(cancellationToken);
+        var groups = await signed
+            .GroupBy(x => x.Signature!)
+            .Select(g => new
             {
-                var variants = g.ToList();
-                var sample = variants.OrderByDescending(x => x.Count).First();
-                return new FailureSignatureDto(
-                    g.Key, sample.Category, FailureSignature.Normalize(sample.Message), sample.Message ?? "(no message)",
-                    variants.Sum(x => x.Count), previousBySignature.GetValueOrDefault(g.Key),
-                    variants.Sum(x => x.Runs), variants.Sum(x => x.TestCases),
-                    variants.Min(x => x.FirstSeen), variants.Max(x => x.LastSeen), variants.Count, variants.Count > 1);
+                Signature = g.Key,
+                Occurrences = g.Count(),
+                Runs = g.Select(x => x.TestRunId).Distinct().Count(),
+                FirstSeen = g.Min(x => x.CompletedAtUtc),
+                LastSeen = g.Max(x => x.CompletedAtUtc)
             })
-            .OrderByDescending(x => x.Occurrences).ThenByDescending(x => x.LastSeenUtc)
+            .OrderByDescending(x => x.Occurrences).ThenByDescending(x => x.LastSeen).ThenBy(x => x.Signature)
             .Take(Math.Clamp(top, 1, 100))
-            .ToList();
-        return new FailureSignatureReportDto(window, current.Sum(x => x.Count), signatures);
+            .ToListAsync(cancellationToken);
+
+        var keys = groups.Select(x => x.Signature).ToList();
+        var testCases = await signed.Where(x => keys.Contains(x.Signature!) && x.TestCaseId != null)
+            .GroupBy(x => x.Signature!)
+            .Select(g => new { Signature = g.Key, Count = g.Select(x => x.TestCaseId).Distinct().Count() })
+            .ToDictionaryAsync(x => x.Signature, x => x.Count, cancellationToken);
+        // The sample is a failure at the signature's last-seen time: an index seek, not a sort of the whole window.
+        var lastSeenBySignature = groups.ToDictionary(x => x.Signature, x => x.LastSeen);
+        var lastSeen = lastSeenBySignature.Values.Distinct().ToList();
+        var samples = (await signed.Where(x => keys.Contains(x.Signature!) && lastSeen.Contains(x.CompletedAtUtc))
+                .Select(x => new { Signature = x.Signature!, x.CompletedAtUtc, x.FailureCategory, x.ErrorMessage })
+                .ToListAsync(cancellationToken))
+            .Where(x => x.CompletedAtUtc == lastSeenBySignature[x.Signature])
+            .GroupBy(x => x.Signature)
+            .ToDictionary(g => g.Key, g => g.OrderBy(x => x.ErrorMessage, StringComparer.Ordinal).First());
+        var previousCounts = await previous.Where(x => keys.Contains(x.Signature!))
+            .GroupBy(x => x.Signature!)
+            .Select(g => new { Signature = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Signature, x => x.Count, cancellationToken);
+
+        var signatures = groups.Select(g =>
+        {
+            var sample = samples[g.Signature];
+            return new FailureSignatureDto(
+                g.Signature, sample.FailureCategory, FailureSignature.Normalize(sample.ErrorMessage), sample.ErrorMessage ?? "(no message)",
+                g.Occurrences, previousCounts.GetValueOrDefault(g.Signature), g.Runs, testCases.GetValueOrDefault(g.Signature), g.FirstSeen, g.LastSeen);
+        }).ToList();
+        var unsigned = totals?.Unsigned ?? 0;
+        return new FailureSignatureReportDto(window, totals?.Failures ?? 0, signatures, distinctSignatures,
+            unsigned, previousUnsigned, unsigned == 0 && previousUnsigned == 0);
     }
 
     [HttpGet("flaky-tests")]
@@ -157,19 +187,5 @@ public sealed class InsightsController(CQPulseDbContext dbContext) : ControllerB
         return projectId is null ? query : query.Where(x => x.TestRun.ProjectId == projectId);
     }
 
-    private static async Task<List<MessageGroup>> GroupFailuresAsync(IQueryable<TestCaseResult> results, CancellationToken cancellationToken) =>
-        await results.Where(x => x.Outcome == TestOutcome.Failed)
-            .GroupBy(x => new { x.FailureCategory, x.ErrorMessage })
-            .OrderByDescending(g => g.Count()).Take(MaxMessageGroups)
-            .Select(g => new MessageGroup(
-                g.Key.FailureCategory, g.Key.ErrorMessage, g.Count(),
-                g.Select(x => x.TestRunId).Distinct().Count(),
-                g.Where(x => x.TestCaseId != null).Select(x => x.TestCaseId).Distinct().Count(),
-                g.Min(x => x.CompletedAtUtc), g.Max(x => x.CompletedAtUtc)))
-            .ToListAsync(cancellationToken);
-
     private static InsightWindow Window(int days) => InsightWindows.LastDays(days, DateTimeOffset.UtcNow);
-
-    private sealed record MessageGroup(
-        FailureCategory? Category, string? Message, int Count, int Runs, int TestCases, DateTimeOffset FirstSeen, DateTimeOffset LastSeen);
 }

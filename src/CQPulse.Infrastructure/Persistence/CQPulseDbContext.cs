@@ -1,3 +1,5 @@
+using CQPulse.Application.Analysis;
+using CQPulse.Domain;
 using CQPulse.Domain.Entities;
 using CQPulse.Infrastructure.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -10,6 +12,7 @@ public sealed class CQPulseDbContext(DbContextOptions<CQPulseDbContext> options)
 {
     public const string RowVersionProperty = "RowVersion";
     public const string ActiveRunIndexName = "UX_TestRuns_ActiveTarget";
+    public const string ResultTimeIndexName = "IX_TestCaseResults_Outcome_CompletedAtUtc";
 
     public DbSet<Project> Projects => Set<Project>();
     public DbSet<TestSuite> TestSuites => Set<TestSuite>();
@@ -82,7 +85,12 @@ public sealed class CQPulseDbContext(DbContextOptions<CQPulseDbContext> options)
             entity.ToTable("TestCaseResults");
             entity.Property(x => x.TestCaseNameSnapshot).HasMaxLength(300).IsRequired();
             entity.Property(x => x.ErrorMessage).HasMaxLength(4_000);
+            entity.Property(x => x.Signature).HasMaxLength(FailureSignature.Length).IsFixedLength().IsUnicode(false);
             entity.HasIndex(x => new { x.TestRunId, x.Outcome });
+            // Time-window analytics and insights: covers grouping by signature without touching the clustered index.
+            entity.HasIndex(x => new { x.Outcome, x.CompletedAtUtc })
+                .IncludeProperties(x => new { x.Signature, x.TestRunId, x.TestCaseId, x.FailureCategory, x.DurationMs })
+                .HasDatabaseName(ResultTimeIndexName);
             entity.HasOne(x => x.TestRun).WithMany(x => x.Results).HasForeignKey(x => x.TestRunId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.TestCase).WithMany(x => x.Results).HasForeignKey(x => x.TestCaseId)
@@ -139,5 +147,28 @@ public sealed class CQPulseDbContext(DbContextOptions<CQPulseDbContext> options)
             entity.HasOne(x => x.TestCaseResult).WithMany(x => x.Logs).HasForeignKey(x => x.TestCaseResultId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        AssignFailureSignatures();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        AssignFailureSignatures();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>Every writer of results (simulator, seeders, tests) stores the same signature as the insights read.</summary>
+    private void AssignFailureSignatures()
+    {
+        foreach (var entry in ChangeTracker.Entries<TestCaseResult>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified)) continue;
+            var result = entry.Entity;
+            result.Signature = result.Outcome == TestOutcome.Failed ? FailureSignature.Compute(result.FailureCategory, result.ErrorMessage) : null;
+        }
     }
 }

@@ -26,10 +26,9 @@ describe('InsightsPage', () => {
       ]
     });
     backend.expectOne(r => r.url === '/api/insights/failure-signatures').flush({
-      window, totalFailures: 70, signatures: [{
+      window, totalFailures: 70, distinctSignatures: 2, unsignedFailures: 0, previousUnsignedFailures: 0, countsComplete: true, signatures: [{
         signature: 'abc123def456', category: 'Timeout', normalizedMessage: 'Simulated Timeout failure.', sampleMessage: 'Simulated Timeout failure.',
-        occurrences: 40, previousOccurrences: 10, affectedRuns: 3, affectedTestCases: 2, firstSeenUtc: '2026-10-01T00:00:00Z', lastSeenUtc: '2026-10-14T00:00:00Z',
-        messageVariants: 1, countsAreUpperBounds: false
+        occurrences: 40, previousOccurrences: 10, affectedRuns: 3, affectedTestCases: 2, firstSeenUtc: '2026-10-01T00:00:00Z', lastSeenUtc: '2026-10-14T00:00:00Z'
       }]
     });
     backend.expectOne(r => r.url === '/api/insights/flaky-tests').flush({
@@ -46,8 +45,28 @@ describe('InsightsPage', () => {
     expect(text).toContain('Failure rate unusually high');
     expect(text).toContain('z = 50');
     expect(text).toContain('40×');
+    expect(text).toContain('70 failures in 2 signatures, top 1 shown');
+    expect(text).not.toContain('not final yet');
     expect(text).toContain('+30 vs previous');
     expect(text).toContain('configured with a Random simulated outcome');
     expect(text).toContain('Prediction: Not offered');
+  });
+
+  it('says when signature counts are not final because the backfill is still running', () => {
+    const fixture = TestBed.createComponent(InsightsPage);
+    fixture.detectChanges();
+    backend.expectOne(r => r.url === '/api/projects').flush({ items: [], totalCount: 0, page: 1, pageSize: 100 });
+    backend.expectOne(r => r.url === '/api/insights/anomalies').flush({
+      window, baselineDays: 14, minimumBaselineDays: 5, minimumDailyResults: 20, threshold: 3, method: 'z-score rule.', days: []
+    });
+    backend.expectOne(r => r.url === '/api/insights/failure-signatures').flush({
+      window, totalFailures: 1200, distinctSignatures: 0, unsignedFailures: 1200, previousUnsignedFailures: 300, countsComplete: false, signatures: []
+    });
+    backend.expectOne(r => r.url === '/api/insights/flaky-tests').flush({ window, minimumExecutions: 5, casesEvaluated: 0, candidates: [] });
+    backend.expectOne(r => r.url === '/api/insights/quality-trends').flush({ window, projects: [], predictionStatus: 'Not offered.' });
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Signature counts are not final yet: 1,200 failures in this window and 300 in the previous one');
   });
 });

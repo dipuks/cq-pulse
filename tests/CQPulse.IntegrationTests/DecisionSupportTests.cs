@@ -9,6 +9,7 @@ using CQPulse.Domain;
 using CQPulse.Domain.Entities;
 using CQPulse.Infrastructure.Integrations.LogTriage;
 using CQPulse.Infrastructure.Integrations.SmartDog;
+using CQPulse.Infrastructure.Persistence;
 using CQPulse.IntegrationTests.Infrastructure;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -217,40 +218,65 @@ public sealed class DecisionSupportTests(ApiFixture fixture)
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync($"/api/decision-evaluations/{Guid.NewGuid()}")).StatusCode);
     }
 
+    /// <summary>Recurrence used to be refused above 10,000 distinct messages in 30 days; it is now counted exactly in SQL.</summary>
     [Fact]
-    public async Task Recurrence_that_cannot_be_counted_exactly_is_refused_not_undercounted()
+    public async Task Recurrence_is_exact_for_more_distinct_messages_than_the_old_in_memory_limit()
+    {
+        var smartDog = new FakeSmartDogHandler();
+        await using var factory = WithIntegrations(new FakeLogTriageHandler(), smartDog);
+        using var client = await AdminClientAsync(factory);
+        var project = await client.CreateProjectAsync();
+        var at = DateTimeOffset.UtcNow.AddMinutes(-5);
+        List<SeedResult> Orders(int first, int count) => Enumerable.Range(first, count)
+            .Select(i => new SeedResult(at.AddMilliseconds(-i), TestOutcome.Failed, FailureCategory.ApiError, $"Order {i} failed for customer {Guid.NewGuid()}")).ToList();
+        var runId = await fixture.InsertCompletedRunAsync(project.Id, Orders(0, 10_001));
+        var otherId = await fixture.InsertCompletedRunAsync(project.Id, [.. Orders(20_000, 2_000), new SeedResult(at, TestOutcome.Failed, FailureCategory.Timeout, "Timeout after 5 ms")]);
+        try
+        {
+            var evaluation = await (await client.PostJsonAsync($"/api/runs/{runId}/decision-support", new { })).ReadAsync<DecisionEvaluationDto>();
+
+            var option = Assert.Single(evaluation.Evidence);
+            Assert.Equal((FailureSignature.Compute(FailureCategory.ApiError, "Order 1 failed for customer 3f2504e0-4f89-11d3-9a0c-0305e82c3301"), 10_001, 12_001),
+                (option.Signature, option.OccurrencesInRun, option.Recurrence30Days));
+            Assert.Equal(AnalysisStatus.Succeeded, evaluation.Status);
+            Assert.Single(smartDog.Requests);
+        }
+        finally
+        {
+            await fixture.DeleteRunsAsync(runId, otherId);
+        }
+    }
+
+    [Fact]
+    public async Task Recurrence_waits_for_the_signature_backfill_instead_of_undercounting()
     {
         var smartDog = new FakeSmartDogHandler();
         await using var factory = WithIntegrations(new FakeLogTriageHandler(), smartDog);
         using var client = await AdminClientAsync(factory);
         var project = await client.CreateProjectAsync();
         var run = await client.RunToCompletionAsync(NewRequest(project.Id, 30));
-        var other = await client.RunToCompletionAsync(NewRequest(project.Id, 5));
-        await fixture.WithDbContextAsync(async db =>
-        {
-            var now = DateTimeOffset.UtcNow;
-            db.TestCaseResults.AddRange(Enumerable.Range(0, DecisionEvidenceBuilder.MaxRecurrenceGroups + 1).Select(i => new TestCaseResult
-            {
-                TestRunId = other.Id, TestCaseNameSnapshot = "Seeded", Outcome = TestOutcome.Failed, StartedAtUtc = now, CompletedAtUtc = now,
-                ErrorMessage = $"Distinct failure {i}", FailureCategory = FailureCategory.ApiError
-            }));
-            return await db.SaveChangesAsync();
-        });
-
+        var other = await client.RunToCompletionAsync(NewRequest(project.Id, 40, seed: 7));
+        await fixture.ClearSignaturesAsync(other.Id);
         try
         {
-            var response = await client.PostJsonAsync($"/api/runs/{run.Id}/decision-support", new { });
+            var refused = await client.PostJsonAsync($"/api/runs/{run.Id}/decision-support", new { });
 
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-            Assert.Contains("exact recurrence counts cannot be computed", await response.Content.ReadAsStringAsync());
+            Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+            Assert.Contains($"{other.FailedCount} failed results from the last 30 days are still waiting for the failure signature backfill",
+                await refused.Content.ReadAsStringAsync());
             Assert.Empty(smartDog.Requests);
             Assert.Empty(await client.GetJsonAsync<List<DecisionEvaluationDto>>($"/api/runs/{run.Id}/decision-support"));
         }
         finally
         {
-            // The seeded rows bypass the run counters; remove them so the shared database stays consistent for other tests.
-            await fixture.WithDbContextAsync(db => db.TestCaseResults.Where(x => x.TestRunId == other.Id && x.TestCaseNameSnapshot == "Seeded").ExecuteDeleteAsync());
+            await factory.Services.GetRequiredService<FailureSignatureBackfill>().RunAsync(100, TimeSpan.Zero, default);
         }
+
+        var evaluation = await (await client.PostJsonAsync($"/api/runs/{run.Id}/decision-support", new { })).ReadAsync<DecisionEvaluationDto>();
+        var expected = await fixture.WithDbContextAsync(db => db.TestCaseResults
+            .Where(x => (x.TestRunId == run.Id || x.TestRunId == other.Id) && x.Outcome == TestOutcome.Failed)
+            .GroupBy(x => x.Signature!).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count));
+        Assert.All(evaluation.Evidence, e => Assert.Equal(expected[e.Signature], e.Recurrence30Days));
     }
 
     [Fact]

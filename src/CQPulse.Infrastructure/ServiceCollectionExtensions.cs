@@ -38,6 +38,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<CQPulse.Application.Catalog.ICatalogService, CatalogService>();
         services.AddScoped<ISimulationService, SimulationService>();
         services.AddHostedService<ExecutionRecoveryService>();
+        services.AddOptions<SignatureBackfillOptions>()
+            .Bind(configuration.GetSection(SignatureBackfillOptions.SectionName))
+            .Validate(options => options.IsValid, "Insights:SignatureBackfill is invalid: BatchSize must be 1-2,000 and PauseMilliseconds 0-60,000.")
+            .ValidateOnStart();
+        services.AddSingleton<FailureSignatureBackfill>();
+        services.AddHostedService<SignatureBackfillService>();
         services.AddHostedService<SimulationWorker>();
         AddLogTriageIntegration(services, configuration);
         AddSmartDogIntegration(services, configuration);

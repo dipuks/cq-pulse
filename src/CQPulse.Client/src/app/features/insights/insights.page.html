@@ -51,14 +51,25 @@
 <section class="grid">
   <article class="panel">
     <div class="panel-title"><div><p class="eyebrow">RECURRING FAILURES</p><h2>Failure signatures</h2></div></div>
-    <p class="empty"><small>Grouped by failure category and normalized message (numbers, ids and quoted values replaced). Ordered by occurrences in the window.</small></p>
+    <p class="empty"><small>Grouped by failure category and normalized message (numbers, ids and quoted values replaced). Ordered by occurrences in the window; every count is exact.</small></p>
+    @if (signatures.value(); as r) {
+      @if (r.totalFailures) {
+        <p class="empty"><small>{{ r.totalFailures | number }} failures in {{ r.distinctSignatures | number }} signatures{{ r.signatures.length < r.distinctSignatures ? ', top ' + r.signatures.length + ' shown' : '' }}.</small></p>
+      }
+      @if (!r.countsComplete) {
+        <p class="error" role="status">
+          Signature counts are not final yet: {{ r.unsignedFailures | number }} failures in this window{{ r.previousUnsignedFailures ? ' and ' + (r.previousUnsignedFailures | number) + ' in the previous one' : '' }}
+          are still waiting for the background signature backfill, so they are in the total but in no signature. Reload when it has finished.
+        </p>
+      }
+    }
     @for (s of signatures.value()?.signatures ?? []; track s.signature) {
       <div class="log">
         <b>{{ s.occurrences | number }}×</b> <span class="status">{{ s.category ?? 'Uncategorized' }}</span>
         <span class="empty"> {{ change(s.occurrences, s.previousOccurrences) }}</span>
         <div><code>{{ s.normalizedMessage }}</code></div>
         <small class="empty">
-          {{ s.affectedRuns | number }} runs · {{ s.affectedTestCases | number }} catalog test cases{{ s.countsAreUpperBounds ? ' (upper bound across ' + s.messageVariants + ' message variants)' : '' }}
+          {{ s.affectedRuns | number }} runs · {{ s.affectedTestCases | number }} catalog test cases
           · last seen {{ s.lastSeenUtc | date: 'short' }} · signature {{ s.signature }}
         </small>
       </div>

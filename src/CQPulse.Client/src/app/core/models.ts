@@ -103,9 +103,13 @@ export interface IntegrationStatus { name: string; configured: boolean; status: 
 export interface InsightWindow { fromUtc: string; toUtc: string; previousFromUtc: string; }
 export interface FailureSignatureItem {
   signature: string; category?: FailureCategory | null; normalizedMessage: string; sampleMessage: string; occurrences: number; previousOccurrences: number;
-  affectedRuns: number; affectedTestCases: number; firstSeenUtc: string; lastSeenUtc: string; messageVariants: number; countsAreUpperBounds: boolean;
+  affectedRuns: number; affectedTestCases: number; firstSeenUtc: string; lastSeenUtc: string;
 }
-export interface FailureSignatureReport { window: InsightWindow; totalFailures: number; signatures: FailureSignatureItem[]; }
+/** Counts are exact over signed failures; unsignedFailures are still waiting for the signature backfill. */
+export interface FailureSignatureReport {
+  window: InsightWindow; totalFailures: number; signatures: FailureSignatureItem[];
+  distinctSignatures: number; unsignedFailures: number; previousUnsignedFailures: number; countsComplete: boolean;
+}
 export interface FlakyCandidate {
   testCaseId: string; testCaseName: string; testSuiteId: string; suiteName: string; configuredOutcome: SimulatedOutcome;
   executions: number; passed: number; failed: number; skipped: number; failureRate: number; outcomeChanges: number; randomnessIsConfigured: boolean;
