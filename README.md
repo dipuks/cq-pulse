@@ -73,7 +73,7 @@ Solid arrows are requests and dotted arrows are responses or pushed updates. In 
 
 - **CQ Pulse** (this repository) orchestrates simulated test runs, stores every result, pushes live progress and computes analytics and insights.
 - **LogTriageAssistant** analyses the failure log that CQ Pulse sends and returns severity, findings with redacted evidence, and next steps.
-- **SmartDog** ranks options against weighted criteria and returns each score's per-criterion contributions. Its evaluation API is deterministic and uses no language model. That API is not yet published on GitHub.
+- **[SmartDog](https://github.com/dipuks/SmartDog)** ranks options against weighted criteria and returns each score's per-criterion contributions. Its evaluation API is deterministic and uses no language model.
 
 The three services run as independent processes with their own storage, and communicate only through HTTPS APIs. CQ Pulse calls them with timeouts, bounded retries, a circuit breaker and correlation ids. More detail: [architecture](docs/architecture.md) and [integration design](docs/quality-intelligence-architecture.md).
 
@@ -133,15 +133,18 @@ Runs that finish with failures are analysed automatically (`Integrations:LogTria
 
 ### Connect SmartDog (optional)
 
-Generate one API key and configure it on both sides (this assumes the repositories are cloned side by side), then restart both:
+1. Clone [SmartDog](https://github.com/dipuks/SmartDog) next to this repository and set it up as its README describes: a JWT signing key and its database (`dotnet ef database update`).
+2. Generate one API key and configure it on both sides, then restart both:
 
 ```powershell
 $key = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 dotnet user-secrets set 'DecisionApi:ApiKeys:0' $key --project ..\SmartDog\SmartDog.Api
-dotnet user-secrets set 'Integrations:SmartDog:BaseUrl' 'https://localhost:7018' --project src\CQPulse.Api
+dotnet user-secrets set 'Integrations:SmartDog:BaseUrl' 'https://localhost:7259' --project src\CQPulse.Api
 dotnet user-secrets set 'Integrations:SmartDog:ApiKey' $key --project src\CQPulse.Api
 Remove-Variable key
 ```
+
+CQ Pulse uses only SmartDog's stateless evaluation API (`POST /api/decisions/evaluate` with `X-Api-Key`). SmartDog's own users and decisions are separate and are not involved.
 
 **Run detail → Decision support** ranks the run's failure signatures by four criteria:
 
@@ -160,7 +163,7 @@ The recommended order is LogTriageAssistant, SmartDog, the CQ Pulse API, then th
 
 ```powershell
 dotnet run --launch-profile https                          # LogTriageAssistant → https://localhost:7291
-dotnet run --project SmartDog.Api --launch-profile https   # SmartDog           → https://localhost:7018
+dotnet run --project SmartDog.Api --launch-profile https   # SmartDog           → https://localhost:7259
 dotnet run --project src\CQPulse.Api --launch-profile https   # CQ Pulse API    → https://localhost:7256
 npm start                                                  # CQ Pulse client (src\CQPulse.Client) → http://localhost:4200
 ```
@@ -177,7 +180,7 @@ Set-Location src\CQPulse.Client; npm test -- --watch=false; npm run build    # 5
 
 Integration tests host the real API in memory and create a temporary `CQPulse_Tests_<guid>` database per test collection. That database is dropped afterwards, and the development database is never touched. To use another SQL Server, set `CQPULSE_TEST_SQL` to a server-level connection string (no database name).
 
-The other services have their own suites: `dotnet test SmartDog.slnx` in SmartDog (49 tests) and `dotnet test Tests` in LogTriageAssistant (108 tests, plus 5 Playwright end-to-end tests).
+The other services have their own suites: `dotnet test SmartDog.slnx` in SmartDog (155 tests, plus 11 client tests) and `dotnet test Tests` in LogTriageAssistant (108 tests, plus 5 Playwright end-to-end tests).
 
 ## Configuration reference
 
@@ -206,7 +209,8 @@ Start with **Settings → Connected services**, which checks each configured ser
 | API fails at startup naming `ConnectionStrings:CQPulse` or `Jwt:SigningKey` | Set both in user secrets (the signing key needs at least 32 characters). |
 | *Invalid object name* errors after updating | Pending migrations: run the `dotnet ef database update` command above. |
 | A service shows **NotConfigured** | Its `Integrations:*` settings are missing. Set them and restart the API. |
-| *Unreachable: No connection could be made…* | The service is not running, or `BaseUrl` has the wrong host or port (LogTriageAssistant `https://localhost:7291`, SmartDog `https://localhost:7018`). |
+| *Unreachable: No connection could be made…* | The service is not running, or `BaseUrl` has the wrong host or port (LogTriageAssistant `https://localhost:7291`, SmartDog `https://localhost:7259`). |
+| SmartDog **Unavailable**: */health returned 503* | SmartDog's health check includes its database: start SQL Server (LocalDB by default) and apply SmartDog's migrations. |
 | *Unreachable: timed out waiting for a response* | No answer within 5 seconds. On Windows a stopped localhost service can also appear this way, because refused connections are retried. |
 | *The SSL connection could not be established* | Trust the development certificate (`dotnet dev-certs https --trust`) and restart the services. |
 | Analysis **Failed**: *LogTriageAssistant rejected the configured service account credentials.* | The account does not exist in that LogTriageAssistant instance, or the credentials differ. Register it and update the secrets; use LogTriageAssistant's https profile. |
@@ -226,7 +230,7 @@ Start with **Settings → Connected services**, which checks each configured ser
 - Ranking is limited to 25 failure signatures per run (the most frequent).
 - Triage severity is based on at most 500 failed results per run, because LogTriageAssistant reports findings for at most 500 lines. Larger runs are sampled so that every signature is represented (most frequent first), and the evidence notes say how many results the severity reflects.
 - Failures saved before the `AddFailureSignatures` migration count in insights and recurrence only after the signature backfill; until then insights say so, and ranking for affected projects is refused (409) rather than undercounted.
-- SmartDog's separate chat workflow requires a local Ollama model and has not been verified; CQ Pulse uses only the structured evaluation API.
+- SmartDog's own web app and its optional OpenAI assistant are separate from CQ Pulse, which uses only the structured evaluation API.
 
 Verified results and remaining unverified items are listed in the [feature audit](docs/feature-audit.md).
 

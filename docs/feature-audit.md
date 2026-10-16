@@ -16,7 +16,7 @@ Related: [README](../README.md) · [architecture](architecture.md) · [integrati
 | Catalog, simulator, run history, analytics, insights | ✅ Exact previewed totals, deterministic seeds, rerun, filters, insight rules. Failure signatures are stored per result and counted exactly in SQL (checked against SQL ground truth on 960,000 results) | Integration tests (M3–M7, Q3); end-to-end runs; [remediation](#remediation-exact-signatures-analysis-backpressure-severity-sample-2026-10-15) |
 | Live progress | ✅ SignalR through the dev proxy (WebSockets) and REST fallback; the browser view never moves backwards | `RealtimeTests`; [release verification](#release-verification-2026-10-14) in headless Edge |
 | Failure triage (LogTriageAssistant) | ✅ Automatic analysis, deduplication, retry without re-running, per-signature severity | `FailureAnalysisTests`; end-to-end against the real service |
-| Decision support (SmartDog) | ✅ Real SmartDog ranking, recomputed independently from the submitted evidence; missing evidence left out with the reason | `DecisionSupportTests`; [Q4](#q4--smartdog-decision-support-2026-10-14) and release verification |
+| Decision support (SmartDog) | ✅ Real SmartDog ranking, recomputed independently from the submitted evidence; missing evidence left out with the reason | `DecisionSupportTests`; [Q4](#q4--smartdog-decision-support-2026-10-14), release verification and the [cross-repository run](#cross-repository-end-to-end-verification-2026-10-15) |
 | Dependency outages | ✅ Either or both services down: runs, dashboard and readiness keep working; failures are recorded as *Unavailable* with the reason; recovery after restart | Offline checks (API and browser) |
 | Migrations and data preservation | ✅ The first 5 migrations applied to the development database after verified backups and a rehearsal; data fingerprint identical before and after. `AddFailureSignatures` rehearsed on a restored copy and on 960,000 results (including rollback); **not yet applied to the development database** | [Q4 migration table](#q4--smartdog-decision-support-2026-10-14); [operations](operations.md#rehearsal-results) |
 | Performance | ✅ 1k, 10k and 50k-test runs with exact totals; peak managed heap under 40 MB | [performance.md](performance.md) |
@@ -25,7 +25,7 @@ Related: [README](../README.md) · [architecture](architecture.md) · [integrati
 ### Not verified
 
 - Browsers other than Microsoft Edge (Chromium, headless).
-- SmartDog's conversational workflow, which needs a local Ollama model. CQ Pulse does not use it.
+- SmartDog's optional OpenAI assistant with a real provider key. CQ Pulse does not use it.
 - Hosting outside a local developer machine. The Release build and `dotnet publish` output were produced but not deployed.
 - Concurrent runs, remote or cloud SQL latency, and many simultaneous browser connections ([performance.md](performance.md#not-measured)).
 
@@ -531,3 +531,23 @@ Fixes for findings C1–C5 of the cross-repository audit.
 | Client tests and production build | ✅ 52/52; build succeeds |
 | Migration rehearsal | ✅ Restored copy of the development database and a generated 960,000-result database: idempotent script, backfill, independent recomputation of every stored signature (0 mismatches), checksums of all original data unchanged, rollback restores identical data ([operations](operations.md#rehearsal-results)) |
 | Development database | Read only (`COPY_ONLY` backup for the rehearsal); fingerprint identical before and after. The migration awaits approval |
+
+### Cross-repository end-to-end verification (2026-10-15)
+
+All three services ran as real processes over HTTPS, from their pushed commits, on isolated storage. Those were CQ Pulse `4bdaa92` plus the timeout-message fix below, LogTriageAssistant `ea5806d` and SmartDog `f21fe79`. CQ Pulse and SmartDog used temporary SQL Server databases, and LogTriageAssistant a scratch SQLite file. The CQ Pulse service account was registered through LogTriageAssistant's sign-up endpoint. The databases and credentials were removed afterwards.
+
+| Area | Result |
+|---|---|
+| Analysis and ranking | ✅ Automatic analysis through LogTriageAssistant (severity HIGH, 40 findings). SmartDog ranking with all four criteria equals an independent recomputation from the stored evidence |
+| Correlation | ✅ `X-Correlation-ID` stored on the evaluation and present in SmartDog's log scope |
+| Idempotency and retries | ✅ An unchanged run reuses its analysis; an explicit retry resubmits stored data (attempt 2, succeeded) |
+| Exact analytics | ✅ Failure-signature counts equal SQL ground truth (228 / 206 / 206 of 640) |
+| Severity sample | ✅ A 3,000-test run (600 failures): 500-line sample, severity for every signature, and a note stating "500 of the run's 600" |
+| Outages | ✅ SmartDog stopped: status Unavailable with the reason, evaluation recorded Unavailable, runs unaffected, and ranking works again after a restart. LogTriageAssistant stopped: analysis Unavailable, succeeding on retry after a restart |
+| Queue saturation | ✅ Queue capacity 1 and an unresponsive LogTriageAssistant: four runs completed in 1.9 s, with one analysis in flight, one queued and two explicitly waiting for a slot |
+| Timeouts | ✅ In-flight analyses time out and are recorded Unavailable. **Defect found and fixed:** the recorded reason was "A task was canceled."; analyses and evaluations now say "timed out waiting for a response." (re-verified end to end) |
+| Restart integrity | ✅ Hard kill while saturated, then restart: the waiting analysis succeeded, the interrupted one was marked for retry, every retry succeeded, and all 8 runs kept consistent counters |
+| SmartDog ownership | ✅ Two registered users: every decision path returns 404 to the other user and 200 to the owner; an `ownerId` in the body is ignored; a user JWT is rejected by the evaluation API, and the API key by user endpoints |
+| LogTriageAssistant accounts | ✅ Analyses appear only in the service account's history; a second account sees none |
+
+Also observed: `Integrations:LogTriage:RetryCount = 0` stops the API at startup, because the standard resilience handler requires at least one retry. The README documents the default (2); a value of 0 is not supported.
