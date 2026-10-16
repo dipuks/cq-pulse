@@ -141,7 +141,7 @@ internal sealed class LogTriageClient(
                                           or Polly.Timeout.TimeoutRejectedException
                                           || (exception is TaskCanceledException && !cancellationToken.IsCancellationRequested))
         {
-            throw new LogTriageUnavailableException($"LogTriageAssistant is unavailable: {exception.GetBaseException().Message}", exception);
+            throw new LogTriageUnavailableException($"LogTriageAssistant is unavailable: {ProbeDetail.Reason(exception)}", exception);
         }
     }
 

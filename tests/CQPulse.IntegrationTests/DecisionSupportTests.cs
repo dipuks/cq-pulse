@@ -214,7 +214,7 @@ public sealed class DecisionSupportTests(ApiFixture fixture)
 
     [Theory]
     [InlineData(FakeSmartDogHandler.Mode.ServerError, AnalysisStatus.Unavailable, "503", 2)]
-    [InlineData(FakeSmartDogHandler.Mode.Slow, AnalysisStatus.Unavailable, "unavailable", 2)]
+    [InlineData(FakeSmartDogHandler.Mode.Slow, AnalysisStatus.Unavailable, "SmartDog is unavailable: timed out waiting for a response.", 2)]
     [InlineData(FakeSmartDogHandler.Mode.Unauthorized, AnalysisStatus.Failed, "rejected the configured API key", 1)]
     [InlineData(FakeSmartDogHandler.Mode.BadRequest, AnalysisStatus.Failed, "criteria[0].weight", 1)]
     [InlineData(FakeSmartDogHandler.Mode.Malformed, AnalysisStatus.Failed, "malformed JSON", 1)]

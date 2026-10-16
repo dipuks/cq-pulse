@@ -96,7 +96,7 @@ public sealed class FailureAnalysisTests(ApiFixture fixture)
     [Theory]
     [InlineData(FakeLogTriageHandler.Mode.Malformed, AnalysisStatus.Failed, "malformed JSON", 1)]
     [InlineData(FakeLogTriageHandler.Mode.RejectCredentials, AnalysisStatus.Failed, "service account credentials", 0)]
-    [InlineData(FakeLogTriageHandler.Mode.Slow, AnalysisStatus.Unavailable, "unavailable", 2)]
+    [InlineData(FakeLogTriageHandler.Mode.Slow, AnalysisStatus.Unavailable, "LogTriageAssistant is unavailable: timed out waiting for a response.", 2)]
     public async Task Bad_responses_and_timeouts_are_recorded_without_fabricated_results(
         FakeLogTriageHandler.Mode mode, AnalysisStatus expected, string reason, int analyzeCalls)
     {

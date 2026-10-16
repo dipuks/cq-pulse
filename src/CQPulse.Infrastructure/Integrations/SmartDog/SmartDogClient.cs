@@ -99,7 +99,7 @@ internal sealed class SmartDogClient(HttpClient http, IOptions<SmartDogOptions> 
         }
         catch (Exception exception) when (IsTransport(exception, cancellationToken))
         {
-            throw new SmartDogUnavailableException($"SmartDog is unavailable: {exception.GetBaseException().Message}", exception);
+            throw new SmartDogUnavailableException($"SmartDog is unavailable: {ProbeDetail.Reason(exception)}", exception);
         }
     }
 

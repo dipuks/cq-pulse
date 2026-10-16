@@ -46,9 +46,16 @@ internal sealed class IntegrationStatusService(
 
 internal static class ProbeDetail
 {
-    /// <summary>Status-check detail for a failed probe. Timeouts surface as cancellations whose own message ("A task was canceled.") says nothing.</summary>
-    public static string Unreachable(Exception exception) =>
-        exception is OperationCanceledException or TimeoutException or Polly.Timeout.TimeoutRejectedException
-            ? "Unreachable: timed out waiting for a response."
-            : $"Unreachable: {exception.GetBaseException().Message}";
+    /// <summary>Status-check detail for a failed probe.</summary>
+    public static string Unreachable(Exception exception) => $"Unreachable: {Reason(exception)}";
+
+    /// <summary>
+    /// Why a call failed. Timeouts surface as cancellations whose own message ("A task was canceled.") says nothing, so
+    /// they are named as timeouts; other failures keep the transport's message.
+    /// </summary>
+    public static string Reason(Exception exception) =>
+        exception is OperationCanceledException or TimeoutException or Polly.Timeout.TimeoutRejectedException ||
+        exception.GetBaseException() is TimeoutException or Polly.Timeout.TimeoutRejectedException
+            ? "timed out waiting for a response."
+            : exception.GetBaseException().Message;
 }
